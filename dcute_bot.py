@@ -23,7 +23,7 @@ DB_NAME = "bookings.db"
 os.makedirs(os.path.dirname(DB_NAME) or ".", exist_ok=True)
 
 # ВСТАВЬТЕ СВОЙ ТОКЕН СЮДА:
-BOT_TOKEN = "8839401866:AAFrengQhjXhraw-ineoIVsU0kMCcfjRrNU"
+BOT_TOKEN = "8668305902:AAFCNyqMdfisL-CaSvR1iVxloxHjeDdikeA"
 
 ADMIN_ID = 848204983
 TIMEZONE = "Asia/Novosibirsk"
