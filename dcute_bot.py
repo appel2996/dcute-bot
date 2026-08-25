@@ -21,6 +21,7 @@ from aiohttp import web
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', handlers=[logging.StreamHandler(sys.stdout)])
 DB_NAME = "bookings.db"
 os.makedirs(os.path.dirname(DB_NAME) or ".", exist_ok=True)
+
 # ⚠️ ВСТАВЬТЕ СВОЙ ТОКЕН СЮДА:
 BOT_TOKEN = "8668305902:AAFCNyqMdfisL-CaSvR1iVxloxHjeDdikeA"
 
@@ -48,7 +49,8 @@ SERVICES = [
     {"name": "Ручная роспись", "duration": 30, "price": 450},
     {"name": "Снятие (без последующего покрытия)", "duration": 30, "price": 300},
     {"name": "Френч", "duration": 15, "price": 300},
-] 
+]
+
 
 # ===== ВРЕМЯ =====
 def now_local(): return datetime.now(TZ)
@@ -336,41 +338,34 @@ async def post_to_channel(text):
     except Exception as e:
         logging.error(f"Ошибка отправки в канал: {e}")
 
-# === КНОПКА ГЛАВНОГО МЕНЮ ===
-@dp.message(Command("menu"))
-async def menu_command(message: types.Message, state: FSMContext):
-    await state.clear()
-    await message.answer(
-        "🌸 <b>Добро пожаловать в D.Cute Beauty</b> 🌸\n\n"
-        "✨ <i>Красота начинается с заботы о себе</i>\n\n"
-        "Выберите действие:",
-        reply_markup=main_kb(message.from_user.id)
-    )
-
 # === ХЕНДЛЕРЫ ===
 @dp.message(Command("start"))
 async def start(message: types.Message, state: FSMContext):
+    # Проверяем, откуда пришло сообщение
+    chat_type = message.chat.type
+    
+    # Если это канал или группа — показываем ссылку
+    if chat_type in ["group", "supergroup", "channel"]:
+        await state.clear()
+        await message.reply(
+            "🌸 <b>D.Cute Beauty — запись к мастеру</b>\n\n"
+            "💅 Маникюр, педикюр, покрытие и дизайн.\n\n"
+            "📅 Чтобы записаться, перейдите в бота:\n"
+            "👉 @DariaCuteBot\n\n"
+            "💌 <i>Или нажмите на кнопку ниже:</i>",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="📅 Записаться", url="t.me/DariaCuteBot")
+            .as_markup()
+        )
+        return
+    
+    # Если это личное сообщение — показываем меню
     await state.clear()
     await message.answer(
         "🌸 <b>Добро пожаловать в D.Cute Beauty</b> 🌸\n\n"
         "✨ <i>Красота начинается с заботы о себе</i>\n\n"
         "Выберите действие:",
         reply_markup=main_kb(message.from_user.id)
-    )
-
-# === КАНАЛ/ГРУППА: Команда /start ===
-@dp.message(Command("start"), F.chat.type.in_({"group", "supergroup", "channel"}))
-async def start_channel(message: types.Message, state: FSMContext):
-    await state.clear()
-    await message.reply(
-        "🌸 <b>D.Cute Beauty — запись к мастеру</b>\n\n"
-        "💅 Маникюр, педикюр, покрытие и дизайн.\n\n"
-        "📅 Чтобы записаться, перейдите в бота:\n"
-        "👉 @DariaCuteBot\n\n"
-        "💌 <i>Или нажмите на кнопку ниже:</i>",
-        reply_markup=InlineKeyboardBuilder()
-        .button(text="📅 Записаться", url="t.me/DariaCuteBot")
-        .as_markup()
     )
 
 # === КАНАЛ/ГРУППА: Команда /book ===
@@ -385,15 +380,13 @@ async def book_channel(message: types.Message):
         .as_markup()
     )
 
-# === КАНАЛ/ГРУППА: Обработка ссылок ===
-@dp.message(F.text.contains("t.me/DariaCuteBot"), F.chat.type.in_({"group", "supergroup", "channel"}))
-async def handle_bot_link(message: types.Message):
-    await message.reply(
-        "🌸 <b>Запись к мастеру D.Cute</b>\n\n"
-        "📅 Нажмите на кнопку, чтобы перейти в бот:",
-        reply_markup=InlineKeyboardBuilder()
-        .button(text="📅 Записаться", url="t.me/DariaCuteBot")
-        .as_markup()
+@dp.message(Command("menu"))
+async def menu_command(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        "🌸 <b>Главное меню</b>\n\n"
+        "Выберите действие:",
+        reply_markup=main_kb(message.from_user.id)
     )
 
 # === КНОПКИ НАЗАД ===
@@ -1074,7 +1067,6 @@ async def admin_all(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=admin_kb())
     await callback.answer()
 
-# ===== ОТПРАВКА В КАНАЛ =====
 @dp.callback_query(F.data == "admin_post_to_channel")
 async def admin_post_to_channel(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -1098,7 +1090,6 @@ async def admin_post_to_channel(callback: CallbackQuery):
     await post_to_channel(text)
     await callback.answer("✅ Опубликовано в канале!")
 
-# ===== КАЛЕНДАРЬ =====
 @dp.callback_query(F.data.startswith("cal:"))
 async def calendar_nav(callback: CallbackQuery):
     _, prefix, year, month = callback.data.split(":")
