@@ -688,6 +688,28 @@ async def main():
     logging.info("База данных: %s", DB_NAME)
     asyncio.create_task(reminder_loop())
     await dp.start_polling(bot)
+    from aiohttp import web
+
+async def health_check(request):
+    return web.Response(text="OK")
+
+async def start_web():
+    app = web.Application()
+    app.router.add_get("/", health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080)))
+    await site.start()
+    logging.info(f"Веб-сервер запущен на порту {int(os.getenv('PORT', 8080))}")
+    await asyncio.Event().wait()
+
+async def main():
+    logging.info("🚀 Бот D.Cute запущен")
+    logging.info("Часовой пояс: %s", TIMEZONE)
+    logging.info("База данных: %s", DB_NAME)
+    asyncio.create_task(reminder_loop())
+    asyncio.create_task(start_web())
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
