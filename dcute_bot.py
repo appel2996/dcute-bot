@@ -26,7 +26,7 @@ os.makedirs(os.path.dirname(DB_NAME) or ".", exist_ok=True)
 BOT_TOKEN = "8668305902:AAFCNyqMdfisL-CaSvR1iVxloxHjeDdikeA"
 
 # 👑 АДМИНИСТРАТОРЫ (укажите Telegram ID)
-ADMINS = [848204983, 123456789, ]  # Ваш ID и ID жены
+ADMINS = [848204983, 123456789, 953017630]  # Ваш ID и ID жены
 
 TIMEZONE = "Asia/Novosibirsk"
 WORK_START, WORK_END, BREAK_TIME = 10, 20, 15
@@ -45,6 +45,7 @@ SERVICES = [
     {"name": "Снятие (без последующего покрытия)", "duration": 30, "price": 300},
     {"name": "Френч", "duration": 15, "price": 300},
 ]
+
 
 # ===== ВРЕМЯ =====
 def now_local(): return datetime.now(TZ)
@@ -208,7 +209,6 @@ class AdminSearch(StatesGroup):
 def main_kb(uid):
     b = InlineKeyboardBuilder()
     b.button(text="📅 Записаться", callback_data="client_book")
-    # Админ-панель показываем только администраторам
     if uid in ADMINS:
         b.button(text="👑 Админ-панель", callback_data="admin_panel")
     b.adjust(1)
@@ -318,6 +318,28 @@ async def start(message: types.Message, state: FSMContext):
         reply_markup=main_kb(message.from_user.id)
     )
 
+# === ГРУППОВЫЕ КОМАНДЫ ===
+@dp.message(Command("start"), F.chat.type.in_({"group", "supergroup"}))
+async def start_group(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.reply(
+        "👋 Привет! Я бот для записи к мастеру D.Cute!\n\n"
+        "Чтобы записаться, просто напишите мне в личные сообщения.\n"
+        "Или нажмите на кнопку ниже 👇",
+        reply_markup=InlineKeyboardBuilder()
+        .button(text="📅 Записаться в личку", url="t.me/DariaCuteBot")
+        .as_markup()
+    )
+
+@dp.message(Command("book"), F.chat.type.in_({"group", "supergroup"}))
+async def book_group(message: types.Message):
+    await message.reply(
+        "📅 Чтобы записаться, перейдите в бота:\n"
+        "👉 t.me/DariaCuteBot\n\n"
+        "И нажмите «📅 Записаться»"
+    )
+
+# === ОСНОВНЫЕ ХЕНДЛЕРЫ ===
 @dp.callback_query(F.data == "client_book")
 async def client_book(callback: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -328,17 +350,26 @@ async def client_book(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ClientStates.service)
     await callback.answer()
 
-@dp.callback_query(ClientStates.service, F.data.startswith("client_service:"))
+# ===== ОБРАБОТЧИК ВЫБОРА УСЛУГИ (ИСПРАВЛЕННЫЙ) =====
+@dp.callback_query(ClientStates.service, F.data.startswith("client_service_"))
 async def client_service(callback: CallbackQuery, state: FSMContext):
-    service = SERVICES[int(callback.data.split(":")[1])]
-    await state.update_data(service=service)
-    today = now_local().date()
-    await callback.message.edit_text(
-        f"✋ {service['name']}\n⏱ {service['duration']} мин\n💰 {fmt_money(service['price'])}\n\n📅 Выберите дату:",
-        reply_markup=calendar_kb(today.year, today.month, "client_date")
-    )
-    await state.set_state(ClientStates.date)
-    await callback.answer()
+    try:
+        # Получаем индекс услуги из callback_data
+        index = int(callback.data.split("_")[2])
+        service = SERVICES[index]
+        
+        await state.update_data(service=service)
+        today = now_local().date()
+        
+        await callback.message.edit_text(
+            f"✋ {service['name']}\n⏱ {service['duration']} мин\n💰 {fmt_money(service['price'])}\n\n📅 Выберите дату:",
+            reply_markup=calendar_kb(today.year, today.month, "client_date")
+        )
+        await state.set_state(ClientStates.date)
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Ошибка в client_service: {e}")
+        await callback.answer("Произошла ошибка. Попробуйте ещё раз.", show_alert=True)
 
 @dp.callback_query(ClientStates.date, F.data.startswith("client_date:"))
 async def client_date(callback: CallbackQuery, state: FSMContext):
@@ -516,17 +547,22 @@ async def admin_client(message: types.Message, state: FSMContext):
     )
     await state.set_state(AdminStates.service)
 
-@dp.callback_query(AdminStates.service, F.data.startswith("admin_service:"))
+@dp.callback_query(AdminStates.service, F.data.startswith("admin_service_"))
 async def admin_service(callback: CallbackQuery, state: FSMContext):
-    service = SERVICES[int(callback.data.split(":")[1])]
-    await state.update_data(service=service)
-    today = now_local().date()
-    await callback.message.edit_text(
-        f"👤 {(await state.get_data())['client_name']}\n\n✋ {service['name']}\n⏱ {service['duration']} мин\n💰 {fmt_money(service['price'])}\n\n📅 Выберите дату:",
-        reply_markup=calendar_kb(today.year, today.month, "admin_date")
-    )
-    await state.set_state(AdminStates.date)
-    await callback.answer()
+    try:
+        index = int(callback.data.split("_")[2])
+        service = SERVICES[index]
+        await state.update_data(service=service)
+        today = now_local().date()
+        await callback.message.edit_text(
+            f"👤 {(await state.get_data())['client_name']}\n\n✋ {service['name']}\n⏱ {service['duration']} мин\n💰 {fmt_money(service['price'])}\n\n📅 Выберите дату:",
+            reply_markup=calendar_kb(today.year, today.month, "admin_date")
+        )
+        await state.set_state(AdminStates.date)
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Ошибка в admin_service: {e}")
+        await callback.answer("Произошла ошибка. Попробуйте ещё раз.", show_alert=True)
 
 @dp.callback_query(AdminStates.date, F.data.startswith("admin_date:"))
 async def admin_date(callback: CallbackQuery, state: FSMContext):
