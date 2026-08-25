@@ -1,7 +1,12 @@
-import asyncio, logging, os, sys, sqlite3
+import asyncio
+import logging
+import os
+import sys
+import sqlite3
 from datetime import datetime, timedelta
 from calendar import monthrange
 from zoneinfo import ZoneInfo
+
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -9,6 +14,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from aiohttp import web
 
 # ===== НАСТРОЙКИ =====
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', handlers=[logging.StreamHandler(sys.stdout)])
@@ -681,15 +688,7 @@ async def reminder_loop():
             pass
         await asyncio.sleep(60)
 
-# ===== ЗАПУСК =====
-async def main():
-    logging.info("🚀 Бот D.Cute запущен")
-    logging.info("Часовой пояс: %s", TIMEZONE)
-    logging.info("База данных: %s", DB_NAME)
-    asyncio.create_task(reminder_loop())
-    await dp.start_polling(bot)
-    from aiohttp import web
-
+# ===== ВЕБ-СЕРВЕР ДЛЯ RENDER =====
 async def health_check(request):
     return web.Response(text="OK")
 
@@ -700,9 +699,10 @@ async def start_web():
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080)))
     await site.start()
-    logging.info(f"Веб-сервер запущен на порту {int(os.getenv('PORT', 8080))}")
+    logging.info(f"🌐 Веб-сервер запущен на порту {int(os.getenv('PORT', 8080))}")
     await asyncio.Event().wait()
 
+# ===== ЗАПУСК =====
 async def main():
     logging.info("🚀 Бот D.Cute запущен")
     logging.info("Часовой пояс: %s", TIMEZONE)
