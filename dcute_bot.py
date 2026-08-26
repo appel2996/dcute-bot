@@ -23,32 +23,30 @@ DB_NAME = "bookings.db"
 os.makedirs(os.path.dirname(DB_NAME) or ".", exist_ok=True)
 
 # ⚠️ ВСТАВЬТЕ СВОЙ ТОКЕН СЮДА:
-BOT_TOKEN = "8668305902:AAFCNyqMdfisL-CaSvR1iVxloxHjeDdikeA"
+BOT_TOKEN = "8668305902:AAFCNyqMdfisL-CaSvR1iVxloxHjeDdikeA" 
 
 # 👑 АДМИНИСТРАТОРЫ (укажите Telegram ID)
-ADMINS = [848204983, 123456789, 953017630] # Ваш ID и ID жены
+ADMINS = [848204983, 123456789, 953017630] # Ваш ID и ID жены 
 
-# 📢 ID КАНАЛА/ГРУППЫ (куда бот будет отправлять уведомления)
-# Для канала: -100XXXXXXXXX (начинается с -100)
-# Для группы: -XXXXXXXXX
-CHANNEL_ID = -1004436721087 # ВСТАВЬТЕ ID ВАШЕГО КАНАЛА
+# 📍 ID ГРУППЫ ДЛЯ ЗАПИСИ
+BOOKING_GROUP_ID = -5546409444
 
 TIMEZONE = "Asia/Novosibirsk"
 WORK_START, WORK_END, BREAK_TIME = 10, 20, 15
 TZ = ZoneInfo(TIMEZONE)
 
-# ===== УСЛУГИ (МЕНЯЙТЕ ЗДЕСЬ) =====
+# ===== УСЛУГИ =====
 SERVICES = [
-    {"name": "Гигиенический маникюр", "duration": 30, "price": 800},
-    {"name": "Легкий дизайн", "duration": 15, "price": 150},
-    {"name": "Маникюр с покрытием (+укрепление)", "duration": 120, "price": 1800},
-    {"name": "Наращивание", "duration": 165, "price": 2100},
-    {"name": "Педикюр экспресс (гигиенический)", "duration": 60, "price": 1000},
-    {"name": "Педикюр экспресс с покрытием", "duration": 90, "price": 1500},
-    {"name": "Полный педикюр", "duration": 120, "price": 2200},
-    {"name": "Ручная роспись", "duration": 30, "price": 450},
-    {"name": "Снятие (без последующего покрытия)", "duration": 30, "price": 300},
-    {"name": "Френч", "duration": 15, "price": 300},
+    {"name": "💅 Маникюр классический", "duration": 60, "price": 1500},
+    {"name": "💅 Маникюр аппаратный", "duration": 60, "price": 1500},
+    {"name": "💅 Маникюр комбинированный", "duration": 70, "price": 1700},
+    {"name": "🦶 Педикюр классический", "duration": 90, "price": 2000},
+    {"name": "🦶 Педикюр аппаратный", "duration": 90, "price": 2000},
+    {"name": "🦶 Педикюр комбинированный", "duration": 100, "price": 2200},
+    {"name": "✨ Покрытие гель-лак (руки)", "duration": 40, "price": 800},
+    {"name": "✨ Покрытие гель-лак (ноги)", "duration": 40, "price": 800},
+    {"name": "🎨 Дизайн ногтей (1 ноготь)", "duration": 15, "price": 300},
+    {"name": "🧴 Снятие гель-лака", "duration": 20, "price": 500},
 ]
 
 # ===== ВРЕМЯ =====
@@ -314,22 +312,29 @@ def confirm_kb(prefix):
     b.adjust(1)
     return b.as_markup()
 
-# ===== ФУНКЦИЯ ДЛЯ ОТПРАВКИ ИНЛАЙН-КНОПКИ В КАНАЛ =====
-async def send_booking_button_to_channel():
-    """Отправляет в канал сообщение с кнопкой для записи"""
+# ===== ФУНКЦИЯ ДЛЯ ОТПРАВКИ ПРИВЕТСТВИЯ В ГРУППУ =====
+async def send_welcome_to_group():
+    """Отправляет приветственное сообщение с кнопкой записи в группу"""
     try:
         await bot.send_message(
-            CHANNEL_ID,
+            BOOKING_GROUP_ID,
             "🌸 <b>D.Cute Beauty — запись к мастеру</b>\n\n"
-            "💅 Маникюр, педикюр, покрытие и дизайн.\n\n"
-            "📅 Нажмите на кнопку, чтобы записаться прямо здесь:",
+            "💅 <b>Услуги:</b>\n"
+            "• Маникюр классический — 1500 ₽\n"
+            "• Маникюр аппаратный — 1500 ₽\n"
+            "• Педикюр — от 2000 ₽\n"
+            "• Покрытие гель-лак — 800 ₽\n"
+            "• Дизайн — от 300 ₽\n\n"
+            "📅 <b>Режим работы:</b>\n"
+            "Пн-Вс: 10:00 - 20:00\n\n"
+            "👇 Нажмите на кнопку, чтобы записаться:",
             reply_markup=InlineKeyboardBuilder()
-            .button(text="📅 Записаться", callback_data="channel_book")
+            .button(text="📅 Записаться", callback_data="client_book")
             .as_markup()
         )
-        logging.info("✅ Кнопка для записи отправлена в канал")
+        logging.info("✅ Приветственное сообщение отправлено в группу")
     except Exception as e:
-        logging.error(f"Ошибка отправки кнопки в канал: {e}")
+        logging.error(f"Ошибка отправки приветствия в группу: {e}")
 
 # ===== ОСНОВНОЙ БОТ =====
 logging.info("🚀 Бот D.Cute запускается...")
@@ -367,17 +372,17 @@ async def menu_command(message: types.Message, state: FSMContext):
         reply_markup=main_kb(message.from_user.id)
     )
 
-# === КНОПКА ЗАПИСИ ИЗ КАНАЛА ===
-@dp.callback_query(F.data == "channel_book")
-async def channel_book(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.edit_text(
-        "💅 <b>Выберите услугу:</b>\n\n"
-        "<i>Нажмите на интересующую вас услугу</i>",
-        reply_markup=services_kb("client_service")
+# === ГРУППА: Обработка команды /book ===
+@dp.message(Command("book"), F.chat.type.in_({"group", "supergroup"}))
+async def book_group(message: types.Message):
+    await message.reply(
+        "🌸 <b>D.Cute Beauty — запись к мастеру</b>\n\n"
+        "💅 Маникюр, педикюр, покрытие и дизайн.\n\n"
+        "👇 Нажмите на кнопку, чтобы записаться:",
+        reply_markup=InlineKeyboardBuilder()
+        .button(text="📅 Записаться", callback_data="client_book")
+        .as_markup()
     )
-    await state.set_state(ClientStates.service)
-    await callback.answer()
 
 # === КНОПКИ НАЗАД ===
 @dp.callback_query(F.data == "back_to_menu")
@@ -527,7 +532,8 @@ async def client_confirm(callback: CallbackQuery, state: FSMContext):
         f"⏱ {service['duration']} мин\n"
         f"💰 {fmt_money(service['price'])}\n\n"
         "💌 <i>Я напомню о записи за 24 часа и за 2 часа.</i>\n"
-        "🌸 <b>До встречи!</b>",
+        "🌸 <b>До встречи!</b>\n\n"
+        "📋 <i>Нажмите «Мои записи», чтобы посмотреть все ваши записи.</i>",
         reply_markup=main_kb(callback.from_user.id)
     )
     
@@ -1101,10 +1107,10 @@ async def main():
     logging.info("🚀 Бот D.Cute запущен")
     logging.info("Часовой пояс: %s", TIMEZONE)
     logging.info("База данных: %s", DB_NAME)
-    logging.info(f"📢 Канал: {CHANNEL_ID}")
+    logging.info(f"📍 Группа для записи: {BOOKING_GROUP_ID}")
     
-    # Отправляем кнопку в канал при запуске
-    await send_booking_button_to_channel()
+    # Отправляем приветствие в группу при запуске
+    await send_welcome_to_group()
     
     asyncio.create_task(reminder_loop())
     asyncio.create_task(start_web())
