@@ -21,7 +21,7 @@ os.makedirs(os.path.dirname(DB_NAME) or ".", exist_ok=True)
 BOT_TOKEN = "8786519194:AAHbzyEru8VHlm9KZ7t8bKrsRBEYf6jeiVM"
 
 ADMINS = [848204983, 953017630]
-BOOKING_GROUP_ID = -5546409444
+BOOKING_GROUP_ID = -3965125401
 TIMEZONE = "Asia/Novosibirsk"
 TZ = ZoneInfo(TIMEZONE)
 
