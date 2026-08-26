@@ -882,5 +882,17 @@ async def send_booking_button(message: types.Message):
     await message.delete()  # Удаляет команду после отправки
     logging.info("✅ Кнопка отправлена в группу")
 
+@dp.message(Command("cancel"))
+async def cancel(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.reply(
+        "❌ <b>Действие отменено</b>\n\n"
+        "Вы можете начать заново, нажав кнопку «📅 Записаться».",
+        reply_markup=InlineKeyboardBuilder()
+        .button(text="📅 Записаться", callback_data="book_start")
+        .as_markup(),
+        parse_mode="HTML"
+    )
+
 if __name__ == "__main__":
     asyncio.run(main())
