@@ -23,10 +23,10 @@ DB_NAME = "bookings.db"
 os.makedirs(os.path.dirname(DB_NAME) or ".", exist_ok=True)
 
 # ⚠️ ВСТАВЬТЕ НОВЫЙ ТОКЕН СЮДА:
-BOT_TOKEN = "8786519194:AAHbzyEru8VHlm9KZ7t8bKrsRBEYf6jeiVM"
+BOT_TOKEN = "8786519194:AAHbzyEru8VHlm9KZ7t8bKrsRBEYf6jeiVM "
 
-# 👑 АДМИНИСТРАТОРЫ (укажите Telegram ID)
-ADMINS = [848204983, 123456789, 953017630]  # Ваш ID, ID жены и ещё один админ
+# 👑 АДМИНИСТРАТОРЫ
+ADMINS = [848204983, 123456789, 953017630]
 
 # 📍 ID ГРУППЫ ДЛЯ ЗАПИСИ
 BOOKING_GROUP_ID = -5546409444
@@ -439,7 +439,7 @@ async def client_confirm(callback: CallbackQuery, state: FSMContext):
     contact = f"@{username}" if username else str(callback.from_user.id)
     bid = add_booking(callback.from_user.id, username, callback.from_user.full_name, contact, service["name"], d, t, service["duration"], service["price"])
     await callback.message.edit_text(
-        f"✅ <b>Запись подтверждена!</b>\n\n📅 {format_date_ru(d)}\n🕐 {t}\n✋ {service['name']}\n⏱ {service['duration']} мин\n💰 {fmt_money(service['price'])}\n\n💌 <i>Я напомню о записи за 24 часа и за 2 часа.</i>\n🌸 <b>До встречи!</b>",
+        f"✅ <b>Запись подтверждена!</b>\n\n📅 {format_date_ru(d)}\n🕐 {t}\n✋ {service['name']}\n⏱ {service['duration']} мин\n💰 {fmt_money(service['price'])}\n🆔 ID записи: <b>#{bid}</b>\n\n💌 <i>Я напомню о записи за 24 часа и за 2 часа.</i>\n🌸 <b>До встречи!</b>",
         reply_markup=main_kb(callback.from_user.id),
         parse_mode="HTML"
     )
@@ -521,6 +521,7 @@ async def back_to_date(callback: CallbackQuery, state: FSMContext):
         await state.set_state(ClientStates.date)
     await callback.answer()
 
+# ===== АДМИН ХЕНДЛЕРЫ =====
 @dp.callback_query(F.data == "admin_today")
 async def admin_today(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -682,13 +683,19 @@ async def admin_confirm_no(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("❌ <b>Добавление отменено</b>", reply_markup=admin_kb(), parse_mode="HTML")
     await callback.answer()
 
+# === ИСПРАВЛЕННЫЙ ОБРАБОТЧИК ОТМЕНЫ ЗАПИСИ ===
 @dp.callback_query(F.data == "admin_cancel")
 async def admin_cancel(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Нет доступа", show_alert=True)
         return
     await state.clear()
-    await callback.message.edit_text("❌ <b>Отмена записи</b>\n\nВведите ID записи.", parse_mode="HTML")
+    await callback.message.edit_text(
+        "❌ <b>Отмена записи</b>\n\n"
+        "Введите <b>ID</b> записи (только цифры).\n\n"
+        "Пример: <code>125</code>",
+        parse_mode="HTML"
+    )
     await state.set_state(AdminCancel.booking_id)
     await callback.answer()
 
@@ -696,22 +703,46 @@ async def admin_cancel(callback: CallbackQuery, state: FSMContext):
 async def admin_cancel_id(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
+    
     text = (message.text or "").strip()
+    
     if not text.isdigit():
-        await message.answer("Введите только ID записи.")
+        await message.answer("❌ Ошибка: ID должен быть числом. Попробуйте ещё раз.")
         return
+    
     bid = int(text)
     booking = get_booking(bid)
-    if not booking or booking[10] != "active":
-        await message.answer("Активная запись не найдена.")
+    
+    if not booking:
+        await message.answer(f"❌ Запись с ID #{bid} не найдена.\nПроверьте правильность ID.")
         return
+    
+    if booking[10] != "active":
+        await message.answer(f"❌ Запись #{bid} уже была отменена или завершена.")
+        return
+    
     cancel_booking(bid)
-    await message.answer(f"✅ Запись #{bid} отменена.", reply_markup=admin_kb())
+    
+    await message.answer(
+        f"✅ <b>Запись #{bid} успешно отменена!</b>",
+        reply_markup=admin_kb(),
+        parse_mode="HTML"
+    )
+    
     if booking[1]:
         try:
-            await bot.send_message(booking[1], f"❌ <b>Ваша запись отменена</b>\n\n📅 {format_date_ru(booking[6])}\n🕐 {booking[7]}\n✋ {booking[5]}", parse_mode="HTML")
-        except:
-            pass
+            await bot.send_message(
+                booking[1],
+                f"❌ <b>Ваша запись была отменена администратором.</b>\n\n"
+                f"📅 {format_date_ru(booking[6])}\n"
+                f"🕐 {booking[7]}\n"
+                f"✋ {booking[5]}\n\n"
+                "Если у вас есть вопросы, свяжитесь с мастером.",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logging.warning(f"Не удалось уведомить клиента об отмене #{bid}: {e}")
+    
     await state.clear()
 
 @dp.callback_query(F.data == "admin_reschedule")
