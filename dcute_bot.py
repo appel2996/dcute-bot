@@ -46,8 +46,6 @@ SERVICES = [
 
 def now_local(): return datetime.now(TZ)
 def today_str(): return now_local().date().isoformat()
-def tomorrow_str(): return (now_local().date() + timedelta(days=1)).isoformat()
-
 def format_date_ru(d):
     months = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"]
     dt = datetime.strptime(d, "%Y-%m-%d")
@@ -55,13 +53,67 @@ def format_date_ru(d):
 
 def db(): return sqlite3.connect(DB_NAME)
 
+# ===== БЕЗОПАСНАЯ ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ (СОХРАНЯЕТ ВСЕ ЗАПИСИ) =====
 def init_db():
     conn = db()
     cur = conn.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS bookings (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, username TEXT, client_name TEXT, client_contact TEXT, service TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, duration INTEGER NOT NULL, price INTEGER NOT NULL, created_at TEXT NOT NULL, status TEXT DEFAULT 'active', reminder_24_sent INTEGER DEFAULT 0, reminder_2_sent INTEGER DEFAULT 0)")
+    
+    # Создаём таблицу, если её нет (без удаления старых данных)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bookings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT,
+            client_name TEXT,
+            client_contact TEXT,
+            service TEXT NOT NULL,
+            date TEXT NOT NULL,
+            time TEXT NOT NULL,
+            duration INTEGER NOT NULL,
+            price INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            status TEXT DEFAULT 'active',
+            reminder_24_sent INTEGER DEFAULT 0,
+            reminder_2_sent INTEGER DEFAULT 0
+        )
+    """)
+    
+    # Проверяем, какие колонки уже есть
+    cur.execute("PRAGMA table_info(bookings)")
+    existing_columns = {row[1] for row in cur.fetchall()}
+    
+    # Все колонки, которые должны быть в таблице
+    required_columns = {
+        "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+        "user_id": "INTEGER",
+        "username": "TEXT",
+        "client_name": "TEXT",
+        "client_contact": "TEXT",
+        "service": "TEXT NOT NULL",
+        "date": "TEXT NOT NULL",
+        "time": "TEXT NOT NULL",
+        "duration": "INTEGER NOT NULL",
+        "price": "INTEGER NOT NULL",
+        "created_at": "TEXT NOT NULL",
+        "status": "TEXT DEFAULT 'active'",
+        "reminder_24_sent": "INTEGER DEFAULT 0",
+        "reminder_2_sent": "INTEGER DEFAULT 0",
+    }
+    
+    # Добавляем только отсутствующие колонки
+    for column, definition in required_columns.items():
+        if column not in existing_columns:
+            try:
+                cur.execute(f"ALTER TABLE bookings ADD COLUMN {column} {definition}")
+                logging.info(f"✅ Добавлена колонка: {column}")
+            except Exception as e:
+                logging.warning(f"Не удалось добавить колонку {column}: {e}")
+    
     conn.commit()
     conn.close()
+    logging.info("✅ База данных инициализирована (данные сохранены)")
 
+# ===== ОСТАЛЬНЫЕ ФУНКЦИИ БАЗЫ ДАННЫХ =====
 def add_booking(uid, uname, cname, ccontact, service, d, t, dur, price):
     conn = db()
     cur = conn.cursor()
@@ -449,7 +501,6 @@ async def book_service(callback: CallbackQuery, state: FSMContext):
         service = SERVICES[index]
         await state.update_data(service=service)
         today = now_local().date()
-        # Показываем календарь, начиная с завтрашнего дня
         await callback.message.edit_text(
             f"📅 <b>Выберите дату:</b>\n\n✋ {service['name']}\n⏱ {service['duration']} мин\n💰 {service['price']}\n\n<i>Запись на сегодня недоступна</i>",
             reply_markup=calendar_kb(today.year, today.month, "book"),
@@ -645,7 +696,6 @@ async def admin_cancel(callback: CallbackQuery, state: FSMContext):
         return
     await state.clear()
     
-    # Получаем список всех активных записей
     rows = get_all_active_bookings()
     list_text = format_bookings_list(rows)
     
@@ -695,7 +745,6 @@ async def admin_reschedule(callback: CallbackQuery, state: FSMContext):
         return
     await state.clear()
     
-    # Получаем список всех активных записей
     rows = get_all_active_bookings()
     list_text = format_bookings_list(rows)
     
