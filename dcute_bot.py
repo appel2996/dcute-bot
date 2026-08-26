@@ -18,13 +18,16 @@ logging.basicConfig(level=logging.INFO)
 DB_NAME = "bookings.db"
 os.makedirs(os.path.dirname(DB_NAME) or ".", exist_ok=True)
 
+# ===== ТОКЕН =====
 BOT_TOKEN = "8786519194:AAHbzyEru8VHlm9KZ7t8bKrsRBEYf6jeiVM"
 
+# ===== АДМИНЫ И ГРУППА =====
 ADMINS = [848204983, 953017630]
 BOOKING_GROUP_ID = -3965125401
 TIMEZONE = "Asia/Novosibirsk"
 TZ = ZoneInfo(TIMEZONE)
 
+# ===== УСЛУГИ =====
 SERVICES = [
     {"name": "Гигиенический маникюр", "duration": 30, "price": "от 800 ₽"},
     {"name": "Легкий дизайн", "duration": 15, "price": "от 150 ₽"},
@@ -262,6 +265,26 @@ def confirm_kb(prefix):
     b.adjust(1)
     return b.as_markup()
 
+# ===== ТАЙМЕР НА 4 МИНУТЫ =====
+async def clear_state_after_timeout(user_id: int, chat_id: int, message_id: int, state: FSMContext):
+    """Очищает состояние пользователя через 4 минуты"""
+    await asyncio.sleep(240)  # 4 минуты = 240 секунд
+    current_state = await state.get_state()
+    if current_state is not None:
+        await state.clear()
+        await bot.send_message(
+            chat_id,
+            "⏰ <b>Время вышло!</b>\n\n"
+            "Вы не завершили запись в течение 4 минут.\n"
+            "Пожалуйста, начните заново, нажав на кнопку 📅 Записаться.",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="📅 Записаться", callback_data="book_start")
+            .as_markup(),
+            parse_mode="HTML"
+        )
+        logging.info(f"⏰ Таймаут 4 мин: очищено состояние пользователя {user_id}")
+
+# ===== ОТПРАВКА ПРИВЕТСТВИЯ В ГРУППУ =====
 async def send_welcome_to_group():
     try:
         await bot.send_message(
@@ -290,7 +313,7 @@ async def notify_admin(text):
         except:
             pass
 
-# ===== КОМАНДА /start (для лички) =====
+# ===== КОМАНДА /start =====
 @dp.message(Command("start"))
 async def start(message: types.Message, state: FSMContext):
     await state.clear()
@@ -312,10 +335,21 @@ async def book_group(message: types.Message):
             parse_mode="HTML"
         )
 
-# ===== КНОПКА ЗАПИСИ (работает везде) =====
+# ===== КНОПКА ЗАПИСИ =====
 @dp.callback_query(F.data == "book_start")
 async def book_start(callback: CallbackQuery, state: FSMContext):
     await state.clear()
+    
+    # Запускаем таймер на 4 минуты
+    asyncio.create_task(
+        clear_state_after_timeout(
+            callback.from_user.id,
+            callback.message.chat.id,
+            callback.message.message_id,
+            state
+        )
+    )
+    
     await callback.message.edit_text(
         "💅 <b>Выберите услугу:</b>",
         reply_markup=services_kb("book"),
@@ -392,6 +426,10 @@ async def book_confirm(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⏰ Это время уже заняли.", show_alert=True)
         await state.set_state(BookingStates.time)
         return
+    
+    # Очищаем состояние (таймер завершится сам)
+    await state.clear()
+    
     username = callback.from_user.username
     contact = f"@{username}" if username else str(callback.from_user.id)
     bid = add_booking(callback.from_user.id, username, callback.from_user.full_name, contact, service["name"], d, t, service["duration"], service["price"])
@@ -401,7 +439,6 @@ async def book_confirm(callback: CallbackQuery, state: FSMContext):
         parse_mode="HTML"
     )
     await notify_admin(f"📥 <b>Новая запись</b>\n\n👤 {callback.from_user.full_name}\n✋ {service['name']}\n📅 {format_date_ru(d)}\n🕐 {t}\n💰 {service['price']}\n🆔 #{bid}")
-    await state.clear()
     await callback.answer()
 
 @dp.callback_query(BookingStates.confirm, F.data == "book:back")
@@ -416,6 +453,19 @@ async def book_confirm_back(callback: CallbackQuery, state: FSMContext):
     )
     await state.set_state(BookingStates.time)
     await callback.answer()
+
+# ===== КОМАНДА /cancel =====
+@dp.message(Command("cancel"))
+async def cancel_command(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.reply(
+        "❌ <b>Действие отменено</b>\n\n"
+        "Вы можете начать заново, нажав на кнопку «📅 Записаться».",
+        reply_markup=InlineKeyboardBuilder()
+        .button(text="📅 Записаться", callback_data="book_start")
+        .as_markup(),
+        parse_mode="HTML"
+    )
 
 # ===== МОИ ЗАПИСИ =====
 @dp.callback_query(F.data == "my_bookings")
@@ -865,6 +915,18 @@ async def main():
     asyncio.create_task(start_web())
     await dp.start_polling(bot)
 
+@dp.message(Command("cancel"))
+async def cancel(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.reply(
+        "❌ <b>Действие отменено</b>\n\n"
+        "Вы можете начать заново, нажав кнопку «📅 Записаться».",
+        reply_markup=InlineKeyboardBuilder()
+        .button(text="📅 Записаться", callback_data="book_start")
+        .as_markup(),
+        parse_mode="HTML"
+    )
+
 # ===== КОМАНДА ДЛЯ ОТПРАВКИ КНОПКИ В ГРУППУ =====
 @dp.message(Command("send_booking_button"))
 async def send_booking_button(message: types.Message):
@@ -879,20 +941,9 @@ async def send_booking_button(message: types.Message):
         .as_markup(),
         parse_mode="HTML"
     )
-    await message.delete()  # Удаляет команду после отправки
+    await message.delete() # Удаляет команду после отправки
     logging.info("✅ Кнопка отправлена в группу")
 
-@dp.message(Command("cancel"))
-async def cancel(message: types.Message, state: FSMContext):
-    await state.clear()
-    await message.reply(
-        "❌ <b>Действие отменено</b>\n\n"
-        "Вы можете начать заново, нажав кнопку «📅 Записаться».",
-        reply_markup=InlineKeyboardBuilder()
-        .button(text="📅 Записаться", callback_data="book_start")
-        .as_markup(),
-        parse_mode="HTML"
-    )
 
 if __name__ == "__main__":
     asyncio.run(main())
