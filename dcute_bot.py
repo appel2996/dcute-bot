@@ -18,13 +18,17 @@ logging.basicConfig(level=logging.INFO)
 DB_NAME = "bookings.db"
 os.makedirs(os.path.dirname(DB_NAME) or ".", exist_ok=True)
 
+# ===== ТОКЕН =====
 BOT_TOKEN = "8786519194:AAHbzyEru8VHlm9KZ7t8bKrsRBEYf6jeiVM"
 
+# ===== АДМИНЫ И ГРУППА =====
 ADMINS = [848204983, 953017630]
-BOOKING_GROUP_ID = -5546409444
+BOOKING_GROUP_ID = -5546409444  # ID группы, где будет работать бот
+
 TIMEZONE = "Asia/Novosibirsk"
 TZ = ZoneInfo(TIMEZONE)
 
+# ===== УСЛУГИ =====
 SERVICES = [
     {"name": "Гигиенический маникюр", "duration": 30, "price": "от 800 ₽"},
     {"name": "Легкий дизайн", "duration": 15, "price": "от 150 ₽"},
@@ -38,6 +42,7 @@ SERVICES = [
     {"name": "Френч", "duration": 15, "price": "от 300 ₽"},
 ]
 
+# ===== ВРЕМЯ =====
 def now_local(): return datetime.now(TZ)
 def today_str(): return now_local().date().isoformat()
 def format_date_ru(d):
@@ -45,6 +50,7 @@ def format_date_ru(d):
     dt = datetime.strptime(d, "%Y-%m-%d")
     return f"{dt.day} {months[dt.month-1]} {dt.year}"
 
+# ===== БАЗА ДАННЫХ =====
 def db(): return sqlite3.connect(DB_NAME)
 
 def init_db():
@@ -152,7 +158,8 @@ def is_time_available(d, t, dur):
             return False
     return True
 
-class ClientStates(StatesGroup):
+# ===== FSM (состояния) =====
+class BookingStates(StatesGroup):
     service = State()
     date = State()
     time = State()
@@ -176,9 +183,10 @@ class AdminReschedule(StatesGroup):
 class AdminSearch(StatesGroup):
     query = State()
 
+# ===== КЛАВИАТУРЫ =====
 def main_kb(uid):
     b = InlineKeyboardBuilder()
-    b.button(text="📅 Записаться", callback_data="client_book")
+    b.button(text="📅 Записаться", callback_data="book_start")
     b.button(text="📋 Мои записи", callback_data="my_bookings")
     if uid in ADMINS:
         b.button(text="👑 Админ-панель", callback_data="admin_panel")
@@ -262,31 +270,20 @@ def confirm_kb(prefix):
     b.adjust(1)
     return b.as_markup()
 
+# ===== ОТПРАВКА ПРИВЕТСТВИЯ В ГРУППУ =====
 async def send_welcome_to_group():
     try:
         await bot.send_message(
             BOOKING_GROUP_ID,
             "🌸 <b>D.Cute Beauty — запись к мастеру</b>\n\n"
-            "💅 <b>Услуги:</b>\n"
-            "• Гигиенический маникюр — от 800 ₽\n"
-            "• Легкий дизайн — от 150 ₽\n"
-            "• Маникюр с покрытием (+укрепление) — от 1800 ₽\n"
-            "• Наращивание — от 2100 ₽\n"
-            "• Педикюр экспресс (гигиенический) — от 1000 ₽\n"
-            "• Педикюр экспресс с покрытием — от 1500 ₽\n"
-            "• Полный педикюр — от 2200 ₽\n"
-            "• Ручная роспись — от 450 ₽\n"
-            "• Снятие (без последующего покрытия) — от 300 ₽\n"
-            "• Френч — от 300 ₽\n\n"
-            "📅 <b>Режим работы:</b>\n"
-            "Пн-Вс: 10:00 - 20:00\n\n"
-            "👇 Нажмите на кнопку, чтобы записаться:",
-            reply_markup=InlineKeyboardBuilder().button(text="📅 Записаться", callback_data="client_book").as_markup(),
+            "👇 Нажмите на кнопку, чтобы записаться прямо в группе:",
+            reply_markup=InlineKeyboardBuilder().button(text="📅 Записаться", callback_data="book_start").as_markup(),
             parse_mode="HTML"
         )
     except Exception as e:
         logging.error(f"Ошибка: {e}")
 
+# ===== ОСНОВНОЙ БОТ =====
 logging.info("🚀 Бот D.Cute запускается...")
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -302,77 +299,59 @@ async def notify_admin(text):
         except:
             pass
 
-@dp.message(Command("start"))
-async def start(message: types.Message, state: FSMContext):
+# ===== ХЕНДЛЕРЫ (ВСЁ В ГРУППЕ) =====
+
+# 1. Кнопка "Записаться" в группе
+@dp.callback_query(F.data == "book_start")
+async def book_start(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    if message.chat.type in ["group", "supergroup", "channel"]:
-        await message.reply(
-            "🌸 <b>D.Cute Beauty</b>\n\n📅 Чтобы записаться, перейдите в бота: @DariaCuteBot",
-            reply_markup=InlineKeyboardBuilder().button(text="📅 Записаться", url="t.me/DariaCuteBot").as_markup(),
-            parse_mode="HTML"
-        )
-        return
-    await message.answer(
-        "🌸 <b>Добро пожаловать в D.Cute Beauty</b> 🌸\n\n"
-        "💅 <b>Услуги:</b>\n"
-        "• Гигиенический маникюр — от 800 ₽\n"
-        "• Легкий дизайн — от 150 ₽\n"
-        "• Маникюр с покрытием (+укрепление) — от 1800 ₽\n"
-        "• Наращивание — от 2100 ₽\n"
-        "• Педикюр экспресс (гигиенический) — от 1000 ₽\n"
-        "• Педикюр экспресс с покрытием — от 1500 ₽\n"
-        "• Полный педикюр — от 2200 ₽\n"
-        "• Ручная роспись — от 450 ₽\n"
-        "• Снятие (без последующего покрытия) — от 300 ₽\n"
-        "• Френч — от 300 ₽\n\n"
-        "Выберите действие:",
-        reply_markup=main_kb(message.from_user.id),
+    await callback.message.edit_text(
+        "💅 <b>Выберите услугу:</b>",
+        reply_markup=services_kb("book"),
         parse_mode="HTML"
     )
-
-@dp.callback_query(F.data == "client_book")
-async def client_book(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.edit_text("💅 <b>Выберите услугу:</b>", reply_markup=services_kb("client_service"), parse_mode="HTML")
-    await state.set_state(ClientStates.service)
+    await state.set_state(BookingStates.service)
     await callback.answer()
 
-@dp.callback_query(ClientStates.service, F.data.startswith("client_service_"))
-async def client_service(callback: CallbackQuery, state: FSMContext):
+# 2. Выбор услуги
+@dp.callback_query(BookingStates.service, F.data.startswith("book_"))
+async def book_service(callback: CallbackQuery, state: FSMContext):
     try:
-        index = int(callback.data.split("_")[2])
+        index = int(callback.data.split("_")[1])
         service = SERVICES[index]
         await state.update_data(service=service)
         today = now_local().date()
         await callback.message.edit_text(
             f"📅 <b>Выберите дату:</b>\n\n✋ {service['name']}\n⏱ {service['duration']} мин\n💰 {service['price']}",
-            reply_markup=calendar_kb(today.year, today.month, "client_date"),
+            reply_markup=calendar_kb(today.year, today.month, "book"),
             parse_mode="HTML"
         )
-        await state.set_state(ClientStates.date)
+        await state.set_state(BookingStates.date)
         await callback.answer()
     except Exception as e:
         logging.error(f"Ошибка: {e}")
         await callback.answer("Произошла ошибка.", show_alert=True)
 
-@dp.callback_query(ClientStates.date, F.data.startswith("client_date:"))
-async def client_date(callback: CallbackQuery, state: FSMContext):
+# 3. Выбор даты
+@dp.callback_query(BookingStates.date, F.data.startswith("book:"))
+async def book_date(callback: CallbackQuery, state: FSMContext):
     d = callback.data.split(":", 1)[1]
     data = await state.get_data()
     service = data["service"]
     await state.update_data(date=d)
     await callback.message.edit_text(
         f"🕐 <b>Выберите время:</b>\n\n📅 {format_date_ru(d)}\n✋ {service['name']}\n⏱ {service['duration']} мин",
-        reply_markup=time_kb(d, service["duration"], "client_time"),
+        reply_markup=time_kb(d, service["duration"], "book"),
         parse_mode="HTML"
     )
-    await state.set_state(ClientStates.time)
+    await state.set_state(BookingStates.time)
     await callback.answer()
 
-@dp.callback_query(ClientStates.time, F.data.startswith("client_time_"))
-async def client_time(callback: CallbackQuery, state: FSMContext):
+# 4. Выбор времени
+@dp.callback_query(BookingStates.time, F.data.startswith("book_"))
+async def book_time(callback: CallbackQuery, state: FSMContext):
     try:
-        t = callback.data.split("_")[2]
+        t = callback.data.split("_")[1]
         data = await state.get_data()
         service = data["service"]
         d = data["date"]
@@ -382,56 +361,52 @@ async def client_time(callback: CallbackQuery, state: FSMContext):
         await state.update_data(time=t)
         await callback.message.edit_text(
             f"📝 <b>Проверьте запись:</b>\n\n📅 {format_date_ru(d)}\n🕐 {t}\n✋ {service['name']}\n⏱ {service['duration']} мин\n💰 {service['price']}\n\n✅ <i>Всё верно?</i>",
-            reply_markup=confirm_kb("client_confirm"),
+            reply_markup=confirm_kb("book"),
             parse_mode="HTML"
         )
-        await state.set_state(ClientStates.confirm)
+        await state.set_state(BookingStates.confirm)
         await callback.answer()
     except Exception as e:
         logging.error(f"Ошибка: {e}")
         await callback.answer("Произошла ошибка.", show_alert=True)
 
-@dp.callback_query(ClientStates.confirm, F.data == "client_confirm:yes")
-async def client_confirm(callback: CallbackQuery, state: FSMContext):
+# 5. Подтверждение записи
+@dp.callback_query(BookingStates.confirm, F.data == "book:yes")
+async def book_confirm(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     service = data["service"]
     d = data["date"]
     t = data["time"]
     if not is_time_available(d, t, service["duration"]):
         await callback.answer("⏰ Это время уже заняли.", show_alert=True)
-        await state.set_state(ClientStates.time)
+        await state.set_state(BookingStates.time)
         return
     username = callback.from_user.username
     contact = f"@{username}" if username else str(callback.from_user.id)
     bid = add_booking(callback.from_user.id, username, callback.from_user.full_name, contact, service["name"], d, t, service["duration"], service["price"])
     await callback.message.edit_text(
         f"✅ <b>Запись подтверждена!</b>\n\n📅 {format_date_ru(d)}\n🕐 {t}\n✋ {service['name']}\n⏱ {service['duration']} мин\n💰 {service['price']}\n🆔 ID: #{bid}\n\n💌 Я напомню о записи за 24 часа.",
-        reply_markup=main_kb(callback.from_user.id),
+        reply_markup=InlineKeyboardBuilder().button(text="📋 Мои записи", callback_data="my_bookings").button(text="📅 Новая запись", callback_data="book_start").adjust(1).as_markup(),
         parse_mode="HTML"
     )
     await notify_admin(f"📥 <b>Новая запись</b>\n\n👤 {callback.from_user.full_name}\n✋ {service['name']}\n📅 {format_date_ru(d)}\n🕐 {t}\n💰 {service['price']}\n🆔 #{bid}")
     await state.clear()
     await callback.answer()
 
-@dp.callback_query(ClientStates.confirm, F.data == "client_confirm:back")
-async def client_confirm_back(callback: CallbackQuery, state: FSMContext):
+@dp.callback_query(BookingStates.confirm, F.data == "book:back")
+async def book_confirm_back(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     service = data["service"]
     d = data["date"]
     await callback.message.edit_text(
         f"🕐 <b>Выберите время:</b>\n\n📅 {format_date_ru(d)}\n✋ {service['name']}\n⏱ {service['duration']} мин",
-        reply_markup=time_kb(d, service["duration"], "client_time"),
+        reply_markup=time_kb(d, service["duration"], "book"),
         parse_mode="HTML"
     )
-    await state.set_state(ClientStates.time)
+    await state.set_state(BookingStates.time)
     await callback.answer()
 
-@dp.callback_query(ClientStates.confirm, F.data == "client_confirm:no")
-async def client_confirm_no(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.edit_text("❌ <b>Запись отменена</b>", reply_markup=main_kb(callback.from_user.id), parse_mode="HTML")
-    await callback.answer()
-
+# 6. Мои записи
 @dp.callback_query(F.data == "my_bookings")
 async def my_bookings(callback: CallbackQuery):
     rows = get_user_bookings(callback.from_user.id)
@@ -447,6 +422,42 @@ async def my_bookings(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=main_kb(callback.from_user.id), parse_mode="HTML")
     await callback.answer()
 
+# 7. Кнопки "Назад" и "Главное меню"
+@dp.callback_query(F.data == "back_to_menu")
+async def back_to_menu(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text(
+        "🌸 <b>Главное меню</b>",
+        reply_markup=main_kb(callback.from_user.id),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data == "back_to_services")
+async def back_to_services(callback: CallbackQuery, state: FSMContext):
+    await callback.message.edit_text(
+        "💅 <b>Выберите услугу:</b>",
+        reply_markup=services_kb("book"),
+        parse_mode="HTML"
+    )
+    await state.set_state(BookingStates.service)
+    await callback.answer()
+
+@dp.callback_query(F.data == "back_to_date")
+async def back_to_date(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    service = data.get("service")
+    if service:
+        today = now_local().date()
+        await callback.message.edit_text(
+            f"📅 <b>Выберите дату:</b>\n\n✋ {service['name']}\n⏱ {service['duration']} мин\n💰 {service['price']}",
+            reply_markup=calendar_kb(today.year, today.month, "book"),
+            parse_mode="HTML"
+        )
+        await state.set_state(BookingStates.date)
+    await callback.answer()
+
+# ===== АДМИН-ПАНЕЛЬ (остаётся в личке или можно в группе) =====
 @dp.callback_query(F.data == "admin_panel")
 async def admin_panel(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -461,30 +472,46 @@ async def back_main(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("🌸 <b>Главное меню</b>", reply_markup=main_kb(callback.from_user.id), parse_mode="HTML")
     await callback.answer()
 
-@dp.callback_query(F.data == "back_to_menu")
-async def back_to_menu(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.edit_text("🌸 <b>Главное меню</b>", reply_markup=main_kb(callback.from_user.id), parse_mode="HTML")
+# Админ-функции (сокращённо, но рабочие)
+@dp.callback_query(F.data == "admin_today")
+async def admin_today(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    d = today_str()
+    rows = get_today_bookings(d)
+    text = f"📅 <b>Сегодня — {format_date_ru(d)}</b>\n\n"
+    if not rows:
+        text += "Записей нет."
+    else:
+        for row in rows:
+            bid, name, contact, service, t, dur, price, uid = row
+            text += f"🕐 <b>{t}</b> — {name or 'Клиент'}\n✋ {service}\n📱 {contact or 'не указан'}\n💰 {price} ₽ | #{bid}\n\n"
+    await callback.message.edit_text(text, reply_markup=admin_kb(), parse_mode="HTML")
     await callback.answer()
 
-@dp.callback_query(F.data == "back_to_services")
-async def back_to_services(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("💅 <b>Выберите услугу:</b>", reply_markup=services_kb("client_service"), parse_mode="HTML")
-    await state.set_state(ClientStates.service)
-    await callback.answer()
-
-@dp.callback_query(F.data == "back_to_date")
-async def back_to_date(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    service = data.get("service")
-    if service:
-        today = now_local().date()
-        await callback.message.edit_text(
-            f"📅 <b>Выберите дату:</b>\n\n✋ {service['name']}\n⏱ {service['duration']} мин\n💰 {service['price']}",
-            reply_markup=calendar_kb(today.year, today.month, "client_date"),
-            parse_mode="HTML"
-        )
-        await state.set_state(ClientStates.date)
+@dp.callback_query(F.data == "admin_week")
+async def admin_week(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    start = now_local().date()
+    end = start + timedelta(days=6)
+    rows = [r for r in get_all_active_bookings() if start.isoformat() <= r[6] <= end.isoformat()]
+    text = f"📆 <b>Ближайшие 7 дней</b>\n{format_date_ru(start.isoformat())} — {format_date_ru(end.isoformat())}\n\n"
+    if not rows:
+        text += "Записей нет."
+    else:
+        cur_d = None
+        for row in rows:
+            bid, uid, uname, name, contact, service, d, t, dur, price = row
+            if d != cur_d:
+                cur_d = d
+                text += f"\n<b>📅 {format_date_ru(d)}</b>\n"
+            text += f"🕐 {t} — {name or 'Клиент'}\n{service} | #{bid}\n"
+    if len(text) > 3900:
+        text = text[:3900] + "\n\n…"
+    await callback.message.edit_text(text, reply_markup=admin_kb(), parse_mode="HTML")
     await callback.answer()
 
 @dp.callback_query(F.data == "admin_cancel")
@@ -493,10 +520,7 @@ async def admin_cancel(callback: CallbackQuery, state: FSMContext):
         await callback.answer("⛔ Нет доступа", show_alert=True)
         return
     await state.clear()
-    await callback.message.edit_text(
-        "❌ <b>Отмена записи</b>\n\nВведите ID записи (только цифры).",
-        parse_mode="HTML"
-    )
+    await callback.message.edit_text("❌ <b>Отмена записи</b>\n\nВведите ID записи (только цифры).", parse_mode="HTML")
     await state.set_state(AdminCancel.booking_id)
     await callback.answer()
 
@@ -521,6 +545,161 @@ async def admin_cancel_id(message: types.Message, state: FSMContext):
         except:
             pass
     await state.clear()
+
+@dp.callback_query(F.data == "admin_add")
+async def admin_add(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    await state.clear()
+    await callback.message.edit_text("➕ <b>Новая запись</b>\n\nВведите клиента в формате:\n\n<code>Анна, +79991234567</code>", parse_mode="HTML")
+    await state.set_state(AdminStates.client)
+    await callback.answer()
+
+@dp.message(AdminStates.client)
+async def admin_client(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    text = (message.text or "").strip()
+    if "," in text:
+        name, contact = text.split(",", 1)
+        name = name.strip()
+        contact = contact.strip()
+    else:
+        name = text
+        contact = ""
+    if not name:
+        await message.answer("Введите имя клиента.")
+        return
+    await state.update_data(client_name=name, client_contact=contact)
+    await message.answer(f"👤 <b>{name}</b>\n📱 {contact or 'не указан'}\n\nВыберите услугу:", reply_markup=services_kb("admin"), parse_mode="HTML")
+    await state.set_state(AdminStates.service)
+
+@dp.callback_query(AdminStates.service, F.data.startswith("admin_"))
+async def admin_service(callback: CallbackQuery, state: FSMContext):
+    try:
+        index = int(callback.data.split("_")[1])
+        service = SERVICES[index]
+        await state.update_data(service=service)
+        today = now_local().date()
+        await callback.message.edit_text(
+            f"👤 {(await state.get_data())['client_name']}\n\n✋ {service['name']}\n⏱ {service['duration']} мин\n💰 {service['price']}\n\n📅 <b>Выберите дату:</b>",
+            reply_markup=calendar_kb(today.year, today.month, "admin"),
+            parse_mode="HTML"
+        )
+        await state.set_state(AdminStates.date)
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Ошибка: {e}")
+        await callback.answer("Произошла ошибка.", show_alert=True)
+
+@dp.callback_query(AdminStates.date, F.data.startswith("admin:"))
+async def admin_date(callback: CallbackQuery, state: FSMContext):
+    d = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    service = data["service"]
+    await state.update_data(date=d)
+    await callback.message.edit_text(
+        f"👤 {data['client_name']}\n📱 {data['client_contact'] or 'не указан'}\n\n📅 {format_date_ru(d)}\n✋ {service['name']}\n\n🕐 <b>Выберите время:</b>",
+        reply_markup=time_kb(d, service["duration"], "admin"),
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.time)
+    await callback.answer()
+
+@dp.callback_query(AdminStates.time, F.data.startswith("admin_"))
+async def admin_time(callback: CallbackQuery, state: FSMContext):
+    try:
+        t = callback.data.split("_")[1]
+        data = await state.get_data()
+        service = data["service"]
+        if not is_time_available(data["date"], t, service["duration"]):
+            await callback.answer("⏰ Это время уже занято.", show_alert=True)
+            return
+        await state.update_data(time=t)
+        await callback.message.edit_text(
+            f"➕ <b>Проверьте запись</b>\n\n👤 {data['client_name']}\n📱 {data['client_contact'] or 'не указан'}\n📅 {format_date_ru(data['date'])}\n🕐 {t}\n✋ {service['name']}\n⏱ {service['duration']} мин\n💰 {service['price']}\n\n✅ <i>Всё верно?</i>",
+            reply_markup=confirm_kb("admin"),
+            parse_mode="HTML"
+        )
+        await state.set_state(AdminStates.confirm)
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Ошибка: {e}")
+        await callback.answer("Произошла ошибка.", show_alert=True)
+
+@dp.callback_query(AdminStates.confirm, F.data == "admin:yes")
+async def admin_confirm(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    data = await state.get_data()
+    service = data["service"]
+    if not is_time_available(data["date"], data["time"], service["duration"]):
+        await callback.answer("⏰ Время уже занято.", show_alert=True)
+        await state.clear()
+        return
+    bid = add_booking(None, None, data["client_name"], data["client_contact"], service["name"], data["date"], data["time"], service["duration"], service["price"])
+    await callback.message.edit_text(
+        f"✅ <b>Запись добавлена</b>\n\n👤 {data['client_name']}\n📱 {data['client_contact'] or 'не указан'}\n📅 {format_date_ru(data['date'])}\n🕐 {data['time']}\n✋ {service['name']}\n💰 {service['price']}\n🆔 #{bid}",
+        reply_markup=admin_kb(),
+        parse_mode="HTML"
+    )
+    await state.clear()
+    await callback.answer()
+
+@dp.callback_query(AdminStates.confirm, F.data == "admin:back")
+async def admin_confirm_back(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    service = data["service"]
+    d = data["date"]
+    await callback.message.edit_text(
+        f"👤 {data['client_name']}\n📱 {data['client_contact'] or 'не указан'}\n\n📅 {format_date_ru(d)}\n✋ {service['name']}\n\n🕐 <b>Выберите время:</b>",
+        reply_markup=time_kb(d, service["duration"], "admin"),
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.time)
+    await callback.answer()
+
+@dp.callback_query(AdminStates.confirm, F.data == "admin:no")
+async def admin_confirm_no(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text("❌ <b>Добавление отменено</b>", reply_markup=admin_kb(), parse_mode="HTML")
+    await callback.answer()
+
+@dp.callback_query(F.data == "admin_revenue")
+async def admin_revenue(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    today = now_local().date()
+    month_start = today.replace(day=1)
+    tc, tt = get_revenue(today.isoformat(), today.isoformat())
+    mc, mt = get_revenue(month_start.isoformat(), today.isoformat())
+    await callback.message.edit_text(
+        f"💰 <b>Выручка</b>\n\n📅 <b>Сегодня:</b> {tc} записей | {tt} ₽\n📆 <b>С начала месяца:</b> {mc} записей | {mt} ₽",
+        reply_markup=admin_kb(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data == "admin_all")
+async def admin_all(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    rows = get_all_active_bookings()
+    if not rows:
+        await callback.message.edit_text("📭 Активных записей нет.", reply_markup=admin_kb())
+        await callback.answer()
+        return
+    text = "📋 <b>Активные записи</b>\n\n"
+    for row in rows:
+        bid, uid, uname, name, contact, service, d, t, dur, price = row
+        text += f"<b>#{bid}</b> {name or 'Клиент'}\n📱 {contact or uname or 'нет'}\n📅 {format_date_ru(d)} | 🕐 {t}\n✋ {service}\n💰 {price} ₽\n\n"
+    if len(text) > 3900:
+        text = text[:3900] + "\n\n…"
+    await callback.message.edit_text(text, reply_markup=admin_kb(), parse_mode="HTML")
+    await callback.answer()
 
 @dp.callback_query(F.data == "admin_reschedule")
 async def admin_reschedule(callback: CallbackQuery, state: FSMContext):
@@ -552,12 +731,12 @@ async def admin_booking_id_router(message: types.Message, state: FSMContext):
         today = now_local().date()
         await message.answer(
             f"🔄 <b>Перенос записи #{bid}</b>\n\n👤 {booking[3] or 'Клиент'}\n✋ {booking[5]}\n📅 Сейчас: {format_date_ru(booking[6])} {booking[7]}\n\n📅 <b>Выберите новую дату:</b>",
-            reply_markup=calendar_kb(today.year, today.month, "reschedule_date"),
+            reply_markup=calendar_kb(today.year, today.month, "admin"),
             parse_mode="HTML"
         )
         await state.set_state(AdminReschedule.date)
 
-@dp.callback_query(AdminReschedule.date, F.data.startswith("reschedule_date:"))
+@dp.callback_query(AdminReschedule.date, F.data.startswith("admin:"))
 async def reschedule_date(callback: CallbackQuery, state: FSMContext):
     d = callback.data.split(":", 1)[1]
     data = await state.get_data()
@@ -565,16 +744,16 @@ async def reschedule_date(callback: CallbackQuery, state: FSMContext):
     await state.update_data(date=d)
     await callback.message.edit_text(
         f"🔄 <b>Запись #{booking[0]}</b>\n\n👤 {booking[3] or 'Клиент'}\n✋ {booking[5]}\n📅 Новая дата: {format_date_ru(d)}\n\n🕐 <b>Выберите время:</b>",
-        reply_markup=time_kb(d, booking[8], "reschedule_time"),
+        reply_markup=time_kb(d, booking[8], "admin"),
         parse_mode="HTML"
     )
     await state.set_state(AdminReschedule.time)
     await callback.answer()
 
-@dp.callback_query(AdminReschedule.time, F.data.startswith("reschedule_time_"))
+@dp.callback_query(AdminReschedule.time, F.data.startswith("admin_"))
 async def reschedule_time(callback: CallbackQuery, state: FSMContext):
     try:
-        t = callback.data.split("_")[2]
+        t = callback.data.split("_")[1]
         data = await state.get_data()
         booking = get_booking(data["booking_id"])
         if not is_time_available(data["date"], t, booking[8]):
@@ -630,208 +809,6 @@ async def admin_search_query(message: types.Message, state: FSMContext):
     await message.answer(text, reply_markup=admin_kb(), parse_mode="HTML")
     await state.clear()
 
-@dp.callback_query(F.data == "admin_today")
-async def admin_today(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Нет доступа", show_alert=True)
-        return
-    d = today_str()
-    rows = get_today_bookings(d)
-    text = f"📅 <b>Сегодня — {format_date_ru(d)}</b>\n\n"
-    if not rows:
-        text += "Записей нет."
-    else:
-        for row in rows:
-            bid, name, contact, service, t, dur, price, uid = row
-            text += f"🕐 <b>{t}</b> — {name or 'Клиент'}\n✋ {service}\n📱 {contact or 'не указан'}\n💰 {price} ₽ | #{bid}\n\n"
-    await callback.message.edit_text(text, reply_markup=admin_kb(), parse_mode="HTML")
-    await callback.answer()
-
-@dp.callback_query(F.data == "admin_week")
-async def admin_week(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Нет доступа", show_alert=True)
-        return
-    start = now_local().date()
-    end = start + timedelta(days=6)
-    rows = [r for r in get_all_active_bookings() if start.isoformat() <= r[6] <= end.isoformat()]
-    text = f"📆 <b>Ближайшие 7 дней</b>\n{format_date_ru(start.isoformat())} — {format_date_ru(end.isoformat())}\n\n"
-    if not rows:
-        text += "Записей нет."
-    else:
-        cur_d = None
-        for row in rows:
-            bid, uid, uname, name, contact, service, d, t, dur, price = row
-            if d != cur_d:
-                cur_d = d
-                text += f"\n<b>📅 {format_date_ru(d)}</b>\n"
-            text += f"🕐 {t} — {name or 'Клиент'}\n{service} | #{bid}\n"
-    if len(text) > 3900:
-        text = text[:3900] + "\n\n…"
-    await callback.message.edit_text(text, reply_markup=admin_kb(), parse_mode="HTML")
-    await callback.answer()
-
-@dp.callback_query(F.data == "admin_add")
-async def admin_add(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Нет доступа", show_alert=True)
-        return
-    await state.clear()
-    await callback.message.edit_text("➕ <b>Новая запись</b>\n\nВведите клиента в формате:\n\n<code>Анна, +79991234567</code>", parse_mode="HTML")
-    await state.set_state(AdminStates.client)
-    await callback.answer()
-
-@dp.message(AdminStates.client)
-async def admin_client(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
-    text = (message.text or "").strip()
-    if "," in text:
-        name, contact = text.split(",", 1)
-        name = name.strip()
-        contact = contact.strip()
-    else:
-        name = text
-        contact = ""
-    if not name:
-        await message.answer("Введите имя клиента.")
-        return
-    await state.update_data(client_name=name, client_contact=contact)
-    await message.answer(f"👤 <b>{name}</b>\n📱 {contact or 'не указан'}\n\nВыберите услугу:", reply_markup=services_kb("admin_service"), parse_mode="HTML")
-    await state.set_state(AdminStates.service)
-
-@dp.callback_query(AdminStates.service, F.data.startswith("admin_service_"))
-async def admin_service(callback: CallbackQuery, state: FSMContext):
-    try:
-        index = int(callback.data.split("_")[2])
-        service = SERVICES[index]
-        await state.update_data(service=service)
-        today = now_local().date()
-        await callback.message.edit_text(
-            f"👤 {(await state.get_data())['client_name']}\n\n✋ {service['name']}\n⏱ {service['duration']} мин\n💰 {service['price']}\n\n📅 <b>Выберите дату:</b>",
-            reply_markup=calendar_kb(today.year, today.month, "admin_date"),
-            parse_mode="HTML"
-        )
-        await state.set_state(AdminStates.date)
-        await callback.answer()
-    except Exception as e:
-        logging.error(f"Ошибка: {e}")
-        await callback.answer("Произошла ошибка.", show_alert=True)
-
-@dp.callback_query(AdminStates.date, F.data.startswith("admin_date:"))
-async def admin_date(callback: CallbackQuery, state: FSMContext):
-    d = callback.data.split(":", 1)[1]
-    data = await state.get_data()
-    service = data["service"]
-    await state.update_data(date=d)
-    await callback.message.edit_text(
-        f"👤 {data['client_name']}\n📱 {data['client_contact'] or 'не указан'}\n\n📅 {format_date_ru(d)}\n✋ {service['name']}\n\n🕐 <b>Выберите время:</b>",
-        reply_markup=time_kb(d, service["duration"], "admin_time"),
-        parse_mode="HTML"
-    )
-    await state.set_state(AdminStates.time)
-    await callback.answer()
-
-@dp.callback_query(AdminStates.time, F.data.startswith("admin_time_"))
-async def admin_time(callback: CallbackQuery, state: FSMContext):
-    try:
-        t = callback.data.split("_")[2]
-        data = await state.get_data()
-        service = data["service"]
-        if not is_time_available(data["date"], t, service["duration"]):
-            await callback.answer("⏰ Это время уже занято.", show_alert=True)
-            return
-        await state.update_data(time=t)
-        await callback.message.edit_text(
-            f"➕ <b>Проверьте запись</b>\n\n👤 {data['client_name']}\n📱 {data['client_contact'] or 'не указан'}\n📅 {format_date_ru(data['date'])}\n🕐 {t}\n✋ {service['name']}\n⏱ {service['duration']} мин\n💰 {service['price']}\n\n✅ <i>Всё верно?</i>",
-            reply_markup=confirm_kb("admin_confirm"),
-            parse_mode="HTML"
-        )
-        await state.set_state(AdminStates.confirm)
-        await callback.answer()
-    except Exception as e:
-        logging.error(f"Ошибка: {e}")
-        await callback.answer("Произошла ошибка.", show_alert=True)
-
-@dp.callback_query(AdminStates.confirm, F.data == "admin_confirm:yes")
-async def admin_confirm(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        return
-    data = await state.get_data()
-    service = data["service"]
-    if not is_time_available(data["date"], data["time"], service["duration"]):
-        await callback.answer("⏰ Время уже занято.", show_alert=True)
-        await state.clear()
-        return
-    bid = add_booking(None, None, data["client_name"], data["client_contact"], service["name"], data["date"], data["time"], service["duration"], service["price"])
-    await callback.message.edit_text(
-        f"✅ <b>Запись добавлена</b>\n\n👤 {data['client_name']}\n📱 {data['client_contact'] or 'не указан'}\n📅 {format_date_ru(data['date'])}\n🕐 {data['time']}\n✋ {service['name']}\n💰 {service['price']}\n🆔 #{bid}",
-        reply_markup=admin_kb(),
-        parse_mode="HTML"
-    )
-    await state.clear()
-    await callback.answer()
-
-@dp.callback_query(AdminStates.confirm, F.data == "admin_confirm:back")
-async def admin_confirm_back(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    service = data["service"]
-    d = data["date"]
-    await callback.message.edit_text(
-        f"👤 {data['client_name']}\n📱 {data['client_contact'] or 'не указан'}\n\n📅 {format_date_ru(d)}\n✋ {service['name']}\n\n🕐 <b>Выберите время:</b>",
-        reply_markup=time_kb(d, service["duration"], "admin_time"),
-        parse_mode="HTML"
-    )
-    await state.set_state(AdminStates.time)
-    await callback.answer()
-
-@dp.callback_query(AdminStates.confirm, F.data == "admin_confirm:no")
-async def admin_confirm_no(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.edit_text("❌ <b>Добавление отменено</b>", reply_markup=admin_kb(), parse_mode="HTML")
-    await callback.answer()
-
-@dp.callback_query(F.data == "admin_revenue")
-async def admin_revenue(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Нет доступа", show_alert=True)
-        return
-    today = now_local().date()
-    month_start = today.replace(day=1)
-    tc, tt = get_revenue(today.isoformat(), today.isoformat())
-    mc, mt = get_revenue(month_start.isoformat(), today.isoformat())
-    await callback.message.edit_text(
-        f"💰 <b>Выручка</b>\n\n📅 <b>Сегодня:</b> {tc} записей | {tt} ₽\n📆 <b>С начала месяца:</b> {mc} записей | {mt} ₽",
-        reply_markup=admin_kb(),
-        parse_mode="HTML"
-    )
-    await callback.answer()
-
-@dp.callback_query(F.data == "admin_all")
-async def admin_all(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("⛔ Нет доступа", show_alert=True)
-        return
-    rows = get_all_active_bookings()
-    if not rows:
-        await callback.message.edit_text("📭 Активных записей нет.", reply_markup=admin_kb())
-        await callback.answer()
-        return
-    text = "📋 <b>Активные записи</b>\n\n"
-    for row in rows:
-        bid, uid, uname, name, contact, service, d, t, dur, price = row
-        text += f"<b>#{bid}</b> {name or 'Клиент'}\n📱 {contact or uname or 'нет'}\n📅 {format_date_ru(d)} | 🕐 {t}\n✋ {service}\n💰 {price} ₽\n\n"
-    if len(text) > 3900:
-        text = text[:3900] + "\n\n…"
-    await callback.message.edit_text(text, reply_markup=admin_kb(), parse_mode="HTML")
-    await callback.answer()
-
-@dp.callback_query(F.data == "back_main")
-async def back_main(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.edit_text("🌸 <b>Главное меню</b>", reply_markup=main_kb(callback.from_user.id), parse_mode="HTML")
-    await callback.answer()
-
 @dp.callback_query(F.data.startswith("cal:"))
 async def calendar_nav(callback: CallbackQuery):
     _, prefix, year, month = callback.data.split(":")
@@ -842,6 +819,7 @@ async def calendar_nav(callback: CallbackQuery):
 async def ignore(callback: CallbackQuery):
     await callback.answer()
 
+# ===== НАПОМИНАНИЯ =====
 async def reminder_loop():
     while True:
         try:
@@ -865,6 +843,7 @@ async def reminder_loop():
             pass
         await asyncio.sleep(60)
 
+# ===== ВЕБ-СЕРВЕР ДЛЯ RENDER =====
 async def health_check(request):
     return web.Response(text="OK")
 
@@ -878,6 +857,7 @@ async def start_web():
     logging.info(f"🌐 Веб-сервер на порту {int(os.getenv('PORT', 8080))}")
     await asyncio.Event().wait()
 
+# ===== ЗАПУСК =====
 async def main():
     logging.info("🚀 Бот D.Cute запущен")
     await send_welcome_to_group()
