@@ -18,17 +18,13 @@ logging.basicConfig(level=logging.INFO)
 DB_NAME = "bookings.db"
 os.makedirs(os.path.dirname(DB_NAME) or ".", exist_ok=True)
 
-# ===== ТОКЕН =====
 BOT_TOKEN = "8786519194:AAHbzyEru8VHlm9KZ7t8bKrsRBEYf6jeiVM"
 
-# ===== АДМИНЫ И ГРУППА =====
 ADMINS = [848204983, 953017630]
-BOOKING_GROUP_ID = -5546409444  # ID группы, где будет работать бот
-
+BOOKING_GROUP_ID = -5546409444
 TIMEZONE = "Asia/Novosibirsk"
 TZ = ZoneInfo(TIMEZONE)
 
-# ===== УСЛУГИ =====
 SERVICES = [
     {"name": "Гигиенический маникюр", "duration": 30, "price": "от 800 ₽"},
     {"name": "Легкий дизайн", "duration": 15, "price": "от 150 ₽"},
@@ -42,7 +38,6 @@ SERVICES = [
     {"name": "Френч", "duration": 15, "price": "от 300 ₽"},
 ]
 
-# ===== ВРЕМЯ =====
 def now_local(): return datetime.now(TZ)
 def today_str(): return now_local().date().isoformat()
 def format_date_ru(d):
@@ -50,7 +45,6 @@ def format_date_ru(d):
     dt = datetime.strptime(d, "%Y-%m-%d")
     return f"{dt.day} {months[dt.month-1]} {dt.year}"
 
-# ===== БАЗА ДАННЫХ =====
 def db(): return sqlite3.connect(DB_NAME)
 
 def init_db():
@@ -158,7 +152,6 @@ def is_time_available(d, t, dur):
             return False
     return True
 
-# ===== FSM (состояния) =====
 class BookingStates(StatesGroup):
     service = State()
     date = State()
@@ -183,7 +176,6 @@ class AdminReschedule(StatesGroup):
 class AdminSearch(StatesGroup):
     query = State()
 
-# ===== КЛАВИАТУРЫ =====
 def main_kb(uid):
     b = InlineKeyboardBuilder()
     b.button(text="📅 Записаться", callback_data="book_start")
@@ -270,7 +262,6 @@ def confirm_kb(prefix):
     b.adjust(1)
     return b.as_markup()
 
-# ===== ОТПРАВКА ПРИВЕТСТВИЯ В ГРУППУ =====
 async def send_welcome_to_group():
     try:
         await bot.send_message(
@@ -280,10 +271,10 @@ async def send_welcome_to_group():
             reply_markup=InlineKeyboardBuilder().button(text="📅 Записаться", callback_data="book_start").as_markup(),
             parse_mode="HTML"
         )
+        logging.info("✅ Приветствие отправлено в группу")
     except Exception as e:
-        logging.error(f"Ошибка: {e}")
+        logging.error(f"Ошибка отправки в группу: {e}")
 
-# ===== ОСНОВНОЙ БОТ =====
 logging.info("🚀 Бот D.Cute запускается...")
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -299,9 +290,29 @@ async def notify_admin(text):
         except:
             pass
 
-# ===== ХЕНДЛЕРЫ (ВСЁ В ГРУППЕ) =====
+# ===== КОМАНДА /start (для лички) =====
+@dp.message(Command("start"))
+async def start(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        "🌸 <b>Добро пожаловать в D.Cute Beauty</b> 🌸\n\n"
+        "Выберите действие:",
+        reply_markup=main_kb(message.from_user.id),
+        parse_mode="HTML"
+    )
 
-# 1. Кнопка "Записаться" в группе
+# ===== КОМАНДА /book (для группы) =====
+@dp.message(Command("book"))
+async def book_group(message: types.Message):
+    if message.chat.type in ["group", "supergroup"]:
+        await message.reply(
+            "🌸 <b>D.Cute Beauty — запись к мастеру</b>\n\n"
+            "👇 Нажмите на кнопку, чтобы записаться:",
+            reply_markup=InlineKeyboardBuilder().button(text="📅 Записаться", callback_data="book_start").as_markup(),
+            parse_mode="HTML"
+        )
+
+# ===== КНОПКА ЗАПИСИ (работает везде) =====
 @dp.callback_query(F.data == "book_start")
 async def book_start(callback: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -313,7 +324,7 @@ async def book_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BookingStates.service)
     await callback.answer()
 
-# 2. Выбор услуги
+# ===== ВЫБОР УСЛУГИ =====
 @dp.callback_query(BookingStates.service, F.data.startswith("book_"))
 async def book_service(callback: CallbackQuery, state: FSMContext):
     try:
@@ -332,7 +343,7 @@ async def book_service(callback: CallbackQuery, state: FSMContext):
         logging.error(f"Ошибка: {e}")
         await callback.answer("Произошла ошибка.", show_alert=True)
 
-# 3. Выбор даты
+# ===== ВЫБОР ДАТЫ =====
 @dp.callback_query(BookingStates.date, F.data.startswith("book:"))
 async def book_date(callback: CallbackQuery, state: FSMContext):
     d = callback.data.split(":", 1)[1]
@@ -347,7 +358,7 @@ async def book_date(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BookingStates.time)
     await callback.answer()
 
-# 4. Выбор времени
+# ===== ВЫБОР ВРЕМЕНИ =====
 @dp.callback_query(BookingStates.time, F.data.startswith("book_"))
 async def book_time(callback: CallbackQuery, state: FSMContext):
     try:
@@ -370,7 +381,7 @@ async def book_time(callback: CallbackQuery, state: FSMContext):
         logging.error(f"Ошибка: {e}")
         await callback.answer("Произошла ошибка.", show_alert=True)
 
-# 5. Подтверждение записи
+# ===== ПОДТВЕРЖДЕНИЕ =====
 @dp.callback_query(BookingStates.confirm, F.data == "book:yes")
 async def book_confirm(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -406,7 +417,7 @@ async def book_confirm_back(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BookingStates.time)
     await callback.answer()
 
-# 6. Мои записи
+# ===== МОИ ЗАПИСИ =====
 @dp.callback_query(F.data == "my_bookings")
 async def my_bookings(callback: CallbackQuery):
     rows = get_user_bookings(callback.from_user.id)
@@ -422,24 +433,16 @@ async def my_bookings(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=main_kb(callback.from_user.id), parse_mode="HTML")
     await callback.answer()
 
-# 7. Кнопки "Назад" и "Главное меню"
+# ===== КНОПКИ НАЗАД =====
 @dp.callback_query(F.data == "back_to_menu")
 async def back_to_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text(
-        "🌸 <b>Главное меню</b>",
-        reply_markup=main_kb(callback.from_user.id),
-        parse_mode="HTML"
-    )
+    await callback.message.edit_text("🌸 <b>Главное меню</b>", reply_markup=main_kb(callback.from_user.id), parse_mode="HTML")
     await callback.answer()
 
 @dp.callback_query(F.data == "back_to_services")
 async def back_to_services(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text(
-        "💅 <b>Выберите услугу:</b>",
-        reply_markup=services_kb("book"),
-        parse_mode="HTML"
-    )
+    await callback.message.edit_text("💅 <b>Выберите услугу:</b>", reply_markup=services_kb("book"), parse_mode="HTML")
     await state.set_state(BookingStates.service)
     await callback.answer()
 
@@ -457,7 +460,7 @@ async def back_to_date(callback: CallbackQuery, state: FSMContext):
         await state.set_state(BookingStates.date)
     await callback.answer()
 
-# ===== АДМИН-ПАНЕЛЬ (остаётся в личке или можно в группе) =====
+# ===== АДМИН-ПАНЕЛЬ =====
 @dp.callback_query(F.data == "admin_panel")
 async def admin_panel(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -472,7 +475,7 @@ async def back_main(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("🌸 <b>Главное меню</b>", reply_markup=main_kb(callback.from_user.id), parse_mode="HTML")
     await callback.answer()
 
-# Админ-функции (сокращённо, но рабочие)
+# ===== АДМИН ФУНКЦИИ =====
 @dp.callback_query(F.data == "admin_today")
 async def admin_today(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
@@ -819,7 +822,6 @@ async def calendar_nav(callback: CallbackQuery):
 async def ignore(callback: CallbackQuery):
     await callback.answer()
 
-# ===== НАПОМИНАНИЯ =====
 async def reminder_loop():
     while True:
         try:
@@ -843,7 +845,6 @@ async def reminder_loop():
             pass
         await asyncio.sleep(60)
 
-# ===== ВЕБ-СЕРВЕР ДЛЯ RENDER =====
 async def health_check(request):
     return web.Response(text="OK")
 
@@ -857,7 +858,6 @@ async def start_web():
     logging.info(f"🌐 Веб-сервер на порту {int(os.getenv('PORT', 8080))}")
     await asyncio.Event().wait()
 
-# ===== ЗАПУСК =====
 async def main():
     logging.info("🚀 Бот D.Cute запущен")
     await send_welcome_to_group()
