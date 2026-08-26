@@ -865,5 +865,22 @@ async def main():
     asyncio.create_task(start_web())
     await dp.start_polling(bot)
 
+# ===== КОМАНДА ДЛЯ ОТПРАВКИ КНОПКИ В ГРУППУ =====
+@dp.message(Command("send_booking_button"))
+async def send_booking_button(message: types.Message):
+    if message.from_user.id not in ADMINS:
+        await message.reply("⛔ Нет доступа")
+        return
+    await message.reply(
+        "🌸 <b>D.Cute Beauty — запись к мастеру</b>\n\n"
+        "👇 Нажмите на кнопку, чтобы записаться прямо в группе:",
+        reply_markup=InlineKeyboardBuilder()
+        .button(text="📅 Записаться", callback_data="book_start")
+        .as_markup(),
+        parse_mode="HTML"
+    )
+    await message.delete()  # Удаляет команду после отправки
+    logging.info("✅ Кнопка отправлена в группу")
+
 if __name__ == "__main__":
     asyncio.run(main())
