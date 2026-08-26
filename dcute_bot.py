@@ -33,7 +33,7 @@ BOOKING_GROUP_ID = -5546409444
 
 TIMEZONE = "Asia/Novosibirsk"
 WORK_START, WORK_END, BREAK_TIME = 10, 20, 15
-TZ = ZoneInfo(TIMEZONE) 
+TZ = ZoneInfo(TIMEZONE)
 
 # ===== УСЛУГИ (МЕНЯЙТЕ ЗДЕСЬ) =====
 SERVICES = [
@@ -357,6 +357,24 @@ async def notify_admin(text):
 @dp.message(Command("start"))
 async def start(message: types.Message, state: FSMContext):
     await state.clear()
+    
+    # Проверяем, откуда пришло сообщение
+    if message.chat.type in ["group", "supergroup", "channel"]:
+        # Это группа или канал — показываем ссылку
+        await message.reply(
+            "🌸 <b>D.Cute Beauty — запись к мастеру</b>\n\n"
+            "💅 Маникюр, педикюр, покрытие и дизайн.\n\n"
+            "📅 Чтобы записаться, перейдите в бота:\n"
+            "👉 @DariaCuteBot\n\n"
+            "💌 <i>Или нажмите на кнопку ниже:</i>",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="📅 Записаться", url="t.me/DariaCuteBot")
+            .as_markup(),
+            parse_mode="HTML"
+        )
+        return
+    
+    # Это личное сообщение — показываем меню записи
     await message.answer(
         "🌸 <b>Добро пожаловать в D.Cute Beauty</b> 🌸\n\n"
         "✨ <i>Красота начинается с заботы о себе</i>\n\n"
