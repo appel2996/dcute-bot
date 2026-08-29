@@ -58,7 +58,6 @@ def init_db():
     conn = db()
     cur = conn.cursor()
     
-    # Таблица записей
     cur.execute("""
         CREATE TABLE IF NOT EXISTS bookings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,7 +77,6 @@ def init_db():
         )
     """)
     
-    # Таблица посещаемости (новая)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS attendance (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,12 +87,10 @@ def init_db():
             time TEXT NOT NULL,
             price INTEGER NOT NULL,
             status TEXT DEFAULT 'pending',
-            marked_at TEXT NOT NULL,
-            FOREIGN KEY (booking_id) REFERENCES bookings(id)
+            marked_at TEXT NOT NULL
         )
     """)
     
-    # Проверяем колонки в bookings
     cur.execute("PRAGMA table_info(bookings)")
     existing_columns = {row[1] for row in cur.fetchall()}
     
@@ -125,7 +121,7 @@ def init_db():
     
     conn.commit()
     conn.close()
-    logging.info("✅ База данных инициализирована (данные сохранены)")
+    logging.info("✅ База данных инициализирована")
 
 # ===== ФУНКЦИИ ДЛЯ ПОСЕЩАЕМОСТИ =====
 def add_attendance(booking_id, date, client_name, service, time, price):
@@ -156,11 +152,7 @@ def get_attendance_by_date(date):
 def update_attendance_status(att_id, status):
     conn = db()
     cur = conn.cursor()
-    cur.execute("""
-        UPDATE attendance
-        SET status = ?
-        WHERE id = ?
-    """, (status, att_id))
+    cur.execute("UPDATE attendance SET status = ? WHERE id = ?", (status, att_id))
     changed = cur.rowcount
     conn.commit()
     conn.close()
@@ -178,17 +170,6 @@ def get_attendance_stats(date):
     rows = cur.fetchall()
     conn.close()
     return rows
-
-def get_today_attendance_for_report(date):
-    conn = db()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT id, client_name, service, time, price, status
-        FROM attendance
-        WHERE date = ?
-        ORDER BY time
-    """, (date,))
-    return cur.fetchall()
 
 # ===== ОСТАЛЬНЫЕ ФУНКЦИИ БАЗЫ ДАННЫХ =====
 def add_booking(uid, uname, cname, ccontact, service, d, t, dur, price):
@@ -326,6 +307,7 @@ class AdminReschedule(StatesGroup):
 class AdminSearch(StatesGroup):
     query = State()
 
+# ===== КЛАВИАТУРЫ =====
 def main_kb(uid):
     b = InlineKeyboardBuilder()
     b.button(text="📅 Записаться", callback_data="book_start")
@@ -349,7 +331,9 @@ def admin_kb():
         ("📊 Посещаемость", "admin_attendance"),
         ("◀ Главное меню", "back_main")
     ]
-    b.adjust(2,2,2,2,2)
+    for text, data in items:
+        b.button(text=text, callback_data=data)
+    b.adjust(2, 2, 2, 2, 2)
     return b.as_markup()
 
 def services_kb(prefix):
@@ -425,7 +409,6 @@ def confirm_kb(prefix):
     b.adjust(1)
     return b.as_markup()
 
-# ===== КЛАВИАТУРА ДЛЯ ПОСЕЩАЕМОСТИ =====
 def attendance_kb(att_id):
     b = InlineKeyboardBuilder()
     b.button(text="✅ Был(а)", callback_data=f"att_present_{att_id}")
@@ -475,10 +458,8 @@ async def send_welcome_to_group():
 
 # ===== ЕЖЕДНЕВНОЕ УВЕДОМЛЕНИЕ В 21:00 =====
 async def daily_attendance_notification():
-    """Отправляет админам список клиентов на сегодня в 21:00"""
     while True:
         now = now_local()
-        # Вычисляем время до 21:00
         target = now.replace(hour=21, minute=0, second=0, microsecond=0)
         if now >= target:
             target += timedelta(days=1)
@@ -487,7 +468,6 @@ async def daily_attendance_notification():
         logging.info(f"⏰ Следующее уведомление о посещаемости в 21:00 (через {wait_seconds/3600:.1f} ч)")
         await asyncio.sleep(wait_seconds)
         
-        # Отправляем уведомление
         date_str = today_str()
         rows = get_today_bookings(date_str)
         
@@ -500,19 +480,14 @@ async def daily_attendance_notification():
                     pass
             continue
         
-        # Формируем сообщение
-        text = f"📋 <b>Отчёт за {format_date_ru(date_str)}</b>\n\n"
-        text += "👇 Отметьте каждого клиента:\n\n"
+        text = f"📋 <b>Отчёт за {format_date_ru(date_str)}</b>\n\n👇 Отметьте каждого клиента:\n\n"
         
         for row in rows:
             bid, name, contact, service, t, dur, price, uid = row
-            
-            # Проверяем, есть ли уже запись в attendance
             existing = get_attendance_by_date(date_str)
             existing_ids = {r[1] for r in existing}
             
             if bid in existing_ids:
-                # Находим статус
                 status = "pending"
                 for att in existing:
                     if att[1] == bid:
@@ -525,20 +500,14 @@ async def daily_attendance_notification():
                 else:
                     text += f"⏳ {name or 'Клиент'} — {t} ({service}) — <i>Ожидает отметки</i>\n"
             else:
-                # Добавляем в attendance со статусом pending
                 add_attendance(bid, date_str, name or "Клиент", service, t, price)
                 text += f"⏳ {name or 'Клиент'} — {t} ({service}) — <i>Ожидает отметки</i>\n"
         
-        # Отправляем каждому админу
         for admin_id in ADMINS:
             try:
-                # Получаем записи для кнопок
                 att_rows = get_attendance_by_date(date_str)
                 if att_rows:
-                    # Отправляем первое сообщение со списком
                     msg = await bot.send_message(admin_id, text, parse_mode="HTML")
-                    
-                    # Отправляем кнопки для каждого клиента
                     for att in att_rows:
                         att_id, bid, name, service, t, price, status = att
                         if status == "pending":
@@ -552,7 +521,7 @@ async def daily_attendance_notification():
                 else:
                     await bot.send_message(admin_id, text, parse_mode="HTML")
             except Exception as e:
-                logging.error(f"Ошибка отправки уведомления админу {admin_id}: {e}")
+                logging.error(f"Ошибка отправки админу {admin_id}: {e}")
         
         logging.info(f"✅ Уведомление о посещаемости отправлено на {format_date_ru(date_str)}")
 
@@ -883,8 +852,6 @@ async def attendance_present(callback: CallbackQuery):
         parse_mode="HTML"
     )
     await callback.answer("✅ Отмечено как 'Был(а)'")
-    
-    # Обновляем клавиатуру (убираем кнопки)
     await callback.message.edit_reply_markup(reply_markup=None)
 
 @dp.callback_query(F.data.startswith("att_absent_"))
@@ -900,8 +867,6 @@ async def attendance_absent(callback: CallbackQuery):
         parse_mode="HTML"
     )
     await callback.answer("❌ Отмечено как 'Не пришёл(а)'")
-    
-    # Обновляем клавиатуру (убираем кнопки)
     await callback.message.edit_reply_markup(reply_markup=None)
 
 # ===== АДМИН ФУНКЦИИ =====
@@ -1230,7 +1195,6 @@ async def admin_revenue(callback: CallbackQuery):
     tc, tt = get_revenue(today.isoformat(), today.isoformat())
     mc, mt = get_revenue(month_start.isoformat(), today.isoformat())
     
-    # Добавляем выручку из посещаемости (только те, кто пришёл)
     att_stats = get_attendance_stats(today.isoformat())
     att_revenue = 0
     for status, count, total in att_stats:
