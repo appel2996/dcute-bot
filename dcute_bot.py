@@ -53,12 +53,12 @@ def format_date_ru(d):
 
 def db(): return sqlite3.connect(DB_NAME)
 
-# ===== БЕЗОПАСНАЯ ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ (СОХРАНЯЕТ ВСЕ ЗАПИСИ) =====
+# ===== БЕЗОПАСНАЯ ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ =====
 def init_db():
     conn = db()
     cur = conn.cursor()
     
-    # Создаём таблицу, если её нет (без удаления старых данных)
+    # Таблица записей
     cur.execute("""
         CREATE TABLE IF NOT EXISTS bookings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,11 +78,26 @@ def init_db():
         )
     """)
     
-    # Проверяем, какие колонки уже есть
+    # Таблица посещаемости (новая)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS attendance (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            booking_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            client_name TEXT NOT NULL,
+            service TEXT NOT NULL,
+            time TEXT NOT NULL,
+            price INTEGER NOT NULL,
+            status TEXT DEFAULT 'pending',
+            marked_at TEXT NOT NULL,
+            FOREIGN KEY (booking_id) REFERENCES bookings(id)
+        )
+    """)
+    
+    # Проверяем колонки в bookings
     cur.execute("PRAGMA table_info(bookings)")
     existing_columns = {row[1] for row in cur.fetchall()}
     
-    # Все колонки, которые должны быть в таблице
     required_columns = {
         "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
         "user_id": "INTEGER",
@@ -100,7 +115,6 @@ def init_db():
         "reminder_2_sent": "INTEGER DEFAULT 0",
     }
     
-    # Добавляем только отсутствующие колонки
     for column, definition in required_columns.items():
         if column not in existing_columns:
             try:
@@ -112,6 +126,69 @@ def init_db():
     conn.commit()
     conn.close()
     logging.info("✅ База данных инициализирована (данные сохранены)")
+
+# ===== ФУНКЦИИ ДЛЯ ПОСЕЩАЕМОСТИ =====
+def add_attendance(booking_id, date, client_name, service, time, price):
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO attendance (booking_id, date, client_name, service, time, price, status, marked_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+    """, (booking_id, date, client_name, service, time, price, now_local().isoformat()))
+    att_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return att_id
+
+def get_attendance_by_date(date):
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, booking_id, client_name, service, time, price, status
+        FROM attendance
+        WHERE date = ?
+        ORDER BY time
+    """, (date,))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+def update_attendance_status(att_id, status):
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE attendance
+        SET status = ?
+        WHERE id = ?
+    """, (status, att_id))
+    changed = cur.rowcount
+    conn.commit()
+    conn.close()
+    return changed > 0
+
+def get_attendance_stats(date):
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT status, COUNT(*), COALESCE(SUM(price), 0)
+        FROM attendance
+        WHERE date = ?
+        GROUP BY status
+    """, (date,))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+def get_today_attendance_for_report(date):
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, client_name, service, time, price, status
+        FROM attendance
+        WHERE date = ?
+        ORDER BY time
+    """, (date,))
+    return cur.fetchall()
 
 # ===== ОСТАЛЬНЫЕ ФУНКЦИИ БАЗЫ ДАННЫХ =====
 def add_booking(uid, uname, cname, ccontact, service, d, t, dur, price):
@@ -260,10 +337,19 @@ def main_kb(uid):
 
 def admin_kb():
     b = InlineKeyboardBuilder()
-    items = [("📅 Сегодня","admin_today"),("📆 Неделя","admin_week"),("➕ Добавить запись","admin_add"),("🔄 Перенести запись","admin_reschedule"),("❌ Отменить запись","admin_cancel"),("🔎 Найти клиента","admin_search"),("💰 Выручка","admin_revenue"),("📋 Все записи","admin_all"),("◀ Главное меню","back_main")]
-    for text, data in items:
-        b.button(text=text, callback_data=data)
-    b.adjust(2,2,2,2,1)
+    items = [
+        ("📅 Сегодня", "admin_today"),
+        ("📆 Неделя", "admin_week"),
+        ("➕ Добавить запись", "admin_add"),
+        ("🔄 Перенести запись", "admin_reschedule"),
+        ("❌ Отменить запись", "admin_cancel"),
+        ("🔎 Найти клиента", "admin_search"),
+        ("💰 Выручка", "admin_revenue"),
+        ("📋 Все записи", "admin_all"),
+        ("📊 Посещаемость", "admin_attendance"),
+        ("◀ Главное меню", "back_main")
+    ]
+    b.adjust(2,2,2,2,2)
     return b.as_markup()
 
 def services_kb(prefix):
@@ -279,9 +365,8 @@ def calendar_kb(year, month, prefix):
     first = datetime(year, month, 1).date()
     last = datetime(year, month, monthrange(year, month)[1]).date()
     
-    # Запрещаем показывать сегодняшний день
     today = now_local().date()
-    min_date = today + timedelta(days=1)  # Со следующего дня
+    min_date = today + timedelta(days=1)
     
     pm = (first - timedelta(days=1)).replace(day=1)
     nm = (last + timedelta(days=1)).replace(day=1)
@@ -340,6 +425,14 @@ def confirm_kb(prefix):
     b.adjust(1)
     return b.as_markup()
 
+# ===== КЛАВИАТУРА ДЛЯ ПОСЕЩАЕМОСТИ =====
+def attendance_kb(att_id):
+    b = InlineKeyboardBuilder()
+    b.button(text="✅ Был(а)", callback_data=f"att_present_{att_id}")
+    b.button(text="❌ Не пришёл(а)", callback_data=f"att_absent_{att_id}")
+    b.adjust(2)
+    return b.as_markup()
+
 # ===== ТАЙМЕР НА 4 МИНУТЫ =====
 async def clear_state_after_timeout(user_id: int, chat_id: int, message_id: int, state: FSMContext):
     await asyncio.sleep(240)
@@ -379,6 +472,89 @@ async def send_welcome_to_group():
         logging.info("✅ Приветствие отправлено в группу")
     except Exception as e:
         logging.error(f"Ошибка отправки в группу: {e}")
+
+# ===== ЕЖЕДНЕВНОЕ УВЕДОМЛЕНИЕ В 21:00 =====
+async def daily_attendance_notification():
+    """Отправляет админам список клиентов на сегодня в 21:00"""
+    while True:
+        now = now_local()
+        # Вычисляем время до 21:00
+        target = now.replace(hour=21, minute=0, second=0, microsecond=0)
+        if now >= target:
+            target += timedelta(days=1)
+        
+        wait_seconds = (target - now).total_seconds()
+        logging.info(f"⏰ Следующее уведомление о посещаемости в 21:00 (через {wait_seconds/3600:.1f} ч)")
+        await asyncio.sleep(wait_seconds)
+        
+        # Отправляем уведомление
+        date_str = today_str()
+        rows = get_today_bookings(date_str)
+        
+        if not rows:
+            text = f"📭 <b>{format_date_ru(date_str)}</b>\n\nЗаписей на сегодня нет."
+            for admin_id in ADMINS:
+                try:
+                    await bot.send_message(admin_id, text, parse_mode="HTML")
+                except:
+                    pass
+            continue
+        
+        # Формируем сообщение
+        text = f"📋 <b>Отчёт за {format_date_ru(date_str)}</b>\n\n"
+        text += "👇 Отметьте каждого клиента:\n\n"
+        
+        for row in rows:
+            bid, name, contact, service, t, dur, price, uid = row
+            
+            # Проверяем, есть ли уже запись в attendance
+            existing = get_attendance_by_date(date_str)
+            existing_ids = {r[1] for r in existing}
+            
+            if bid in existing_ids:
+                # Находим статус
+                status = "pending"
+                for att in existing:
+                    if att[1] == bid:
+                        status = att[6]
+                        break
+                if status == "present":
+                    text += f"✅ {name or 'Клиент'} — {t} ({service}) — <b>Был(а)</b>\n"
+                elif status == "absent":
+                    text += f"❌ {name or 'Клиент'} — {t} ({service}) — <b>Не пришёл(а)</b>\n"
+                else:
+                    text += f"⏳ {name or 'Клиент'} — {t} ({service}) — <i>Ожидает отметки</i>\n"
+            else:
+                # Добавляем в attendance со статусом pending
+                add_attendance(bid, date_str, name or "Клиент", service, t, price)
+                text += f"⏳ {name or 'Клиент'} — {t} ({service}) — <i>Ожидает отметки</i>\n"
+        
+        # Отправляем каждому админу
+        for admin_id in ADMINS:
+            try:
+                # Получаем записи для кнопок
+                att_rows = get_attendance_by_date(date_str)
+                if att_rows:
+                    # Отправляем первое сообщение со списком
+                    msg = await bot.send_message(admin_id, text, parse_mode="HTML")
+                    
+                    # Отправляем кнопки для каждого клиента
+                    for att in att_rows:
+                        att_id, bid, name, service, t, price, status = att
+                        if status == "pending":
+                            kb = attendance_kb(att_id)
+                            await bot.send_message(
+                                admin_id,
+                                f"🕐 {t} — {name}\n✋ {service}\n💰 {price} ₽",
+                                reply_markup=kb,
+                                parse_mode="HTML"
+                            )
+                else:
+                    await bot.send_message(admin_id, text, parse_mode="HTML")
+            except Exception as e:
+                logging.error(f"Ошибка отправки уведомления админу {admin_id}: {e}")
+        
+        logging.info(f"✅ Уведомление о посещаемости отправлено на {format_date_ru(date_str)}")
 
 logging.info("🚀 Бот D.Cute запускается...")
 bot = Bot(BOT_TOKEN)
@@ -645,6 +821,88 @@ async def back_main(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.edit_text("🌸 <b>Главное меню</b>", reply_markup=main_kb(callback.from_user.id), parse_mode="HTML")
     await callback.answer()
+
+# ===== АДМИН: ПОСЕЩАЕМОСТЬ =====
+@dp.callback_query(F.data == "admin_attendance")
+async def admin_attendance(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    
+    date_str = today_str()
+    rows = get_attendance_by_date(date_str)
+    
+    if not rows:
+        await callback.message.edit_text(
+            f"📊 <b>Посещаемость за {format_date_ru(date_str)}</b>\n\n"
+            "Записей на сегодня нет.",
+            reply_markup=admin_kb(),
+            parse_mode="HTML"
+        )
+        await callback.answer()
+        return
+    
+    stats = get_attendance_stats(date_str)
+    stats_text = ""
+    for status, count, total in stats:
+        if status == "present":
+            stats_text += f"✅ Был(а): {count} | Выручка: {total} ₽\n"
+        elif status == "absent":
+            stats_text += f"❌ Не пришёл(а): {count}\n"
+        else:
+            stats_text += f"⏳ Ожидают: {count}\n"
+    
+    text = f"📊 <b>Посещаемость за {format_date_ru(date_str)}</b>\n\n"
+    text += stats_text + "\n"
+    text += "📋 <b>Детали:</b>\n\n"
+    
+    for att in rows:
+        att_id, bid, name, service, t, price, status = att
+        if status == "present":
+            icon = "✅"
+        elif status == "absent":
+            icon = "❌"
+        else:
+            icon = "⏳"
+        text += f"{icon} {t} — {name} — {service} ({price} ₽)\n"
+    
+    await callback.message.edit_text(text, reply_markup=admin_kb(), parse_mode="HTML")
+    await callback.answer()
+
+# ===== ОБРАБОТКА ОТМЕТОК ПОСЕЩАЕМОСТИ =====
+@dp.callback_query(F.data.startswith("att_present_"))
+async def attendance_present(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    
+    att_id = int(callback.data.split("_")[2])
+    update_attendance_status(att_id, "present")
+    await callback.message.edit_text(
+        callback.message.text + "\n\n✅ Отмечен(а) как <b>пришёл(а)</b>",
+        parse_mode="HTML"
+    )
+    await callback.answer("✅ Отмечено как 'Был(а)'")
+    
+    # Обновляем клавиатуру (убираем кнопки)
+    await callback.message.edit_reply_markup(reply_markup=None)
+
+@dp.callback_query(F.data.startswith("att_absent_"))
+async def attendance_absent(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    
+    att_id = int(callback.data.split("_")[2])
+    update_attendance_status(att_id, "absent")
+    await callback.message.edit_text(
+        callback.message.text + "\n\n❌ Отмечен(а) как <b>не пришёл(а)</b>",
+        parse_mode="HTML"
+    )
+    await callback.answer("❌ Отмечено как 'Не пришёл(а)'")
+    
+    # Обновляем клавиатуру (убираем кнопки)
+    await callback.message.edit_reply_markup(reply_markup=None)
 
 # ===== АДМИН ФУНКЦИИ =====
 @dp.callback_query(F.data == "admin_today")
@@ -971,8 +1229,23 @@ async def admin_revenue(callback: CallbackQuery):
     month_start = today.replace(day=1)
     tc, tt = get_revenue(today.isoformat(), today.isoformat())
     mc, mt = get_revenue(month_start.isoformat(), today.isoformat())
+    
+    # Добавляем выручку из посещаемости (только те, кто пришёл)
+    att_stats = get_attendance_stats(today.isoformat())
+    att_revenue = 0
+    for status, count, total in att_stats:
+        if status == "present":
+            att_revenue += total
+    
     await callback.message.edit_text(
-        f"💰 <b>Выручка</b>\n\n📅 <b>Сегодня:</b> {tc} записей | {tt} ₽\n📆 <b>С начала месяца:</b> {mc} записей | {mt} ₽",
+        f"💰 <b>Выручка</b>\n\n"
+        f"📅 <b>Сегодня:</b>\n"
+        f"Записей: {tc}\n"
+        f"По записям: {tt} ₽\n"
+        f"По факту (пришедшие): {att_revenue} ₽\n\n"
+        f"📆 <b>С начала месяца:</b>\n"
+        f"Записей: {mc}\n"
+        f"Выручка: {mt} ₽",
         reply_markup=admin_kb(),
         parse_mode="HTML"
     )
@@ -1083,6 +1356,7 @@ async def main():
     logging.info("🚀 Бот D.Cute запущен")
     await send_welcome_to_group()
     asyncio.create_task(reminder_loop())
+    asyncio.create_task(daily_attendance_notification())
     asyncio.create_task(start_web())
     await dp.start_polling(bot)
 
